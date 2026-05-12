@@ -125,6 +125,7 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
         aiohttp = None
 
     original_session = getattr(aiohttp, "ClientSession", None) if aiohttp else None
+    playwright_patches: list[tuple[object, str, object]] = []
 
     if aiohttp and original_session:
         def _client_session_with_proxy(*args, **kwargs):
@@ -135,11 +136,95 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
 
         aiohttp.ClientSession = _client_session_with_proxy  # type: ignore[assignment]
 
+    def _patch_playwright() -> None:
+        """Make scraper-owned browser launches use the configured VM proxy."""
+        proxy = {"server": proxy_url}
+
+        def _add_chromium_ssl_arg(kwargs: dict) -> None:
+            if not insecure_ssl:
+                return
+            args = list(kwargs.get("args") or [])
+            if "--ignore-certificate-errors" not in args:
+                args.append("--ignore-certificate-errors")
+            kwargs["args"] = args
+
+        try:
+            from playwright.async_api import Browser as AsyncBrowser
+            from playwright.async_api import BrowserType as AsyncBrowserType
+
+            original_async_launch = AsyncBrowserType.launch
+            original_async_new_page = AsyncBrowser.new_page
+            original_async_new_context = AsyncBrowser.new_context
+
+            async def _async_launch_with_proxy(self, *args, **kwargs):
+                kwargs.setdefault("proxy", proxy)
+                _add_chromium_ssl_arg(kwargs)
+                return await original_async_launch(self, *args, **kwargs)
+
+            async def _async_new_page_with_ssl(self, *args, **kwargs):
+                if insecure_ssl:
+                    kwargs.setdefault("ignore_https_errors", True)
+                return await original_async_new_page(self, *args, **kwargs)
+
+            async def _async_new_context_with_ssl(self, *args, **kwargs):
+                if insecure_ssl:
+                    kwargs.setdefault("ignore_https_errors", True)
+                return await original_async_new_context(self, *args, **kwargs)
+
+            AsyncBrowserType.launch = _async_launch_with_proxy
+            AsyncBrowser.new_page = _async_new_page_with_ssl
+            AsyncBrowser.new_context = _async_new_context_with_ssl
+            playwright_patches.extend([
+                (AsyncBrowserType, "launch", original_async_launch),
+                (AsyncBrowser, "new_page", original_async_new_page),
+                (AsyncBrowser, "new_context", original_async_new_context),
+            ])
+        except Exception:
+            pass
+
+        try:
+            from playwright.sync_api import Browser as SyncBrowser
+            from playwright.sync_api import BrowserType as SyncBrowserType
+
+            original_sync_launch = SyncBrowserType.launch
+            original_sync_new_page = SyncBrowser.new_page
+            original_sync_new_context = SyncBrowser.new_context
+
+            def _sync_launch_with_proxy(self, *args, **kwargs):
+                kwargs.setdefault("proxy", proxy)
+                _add_chromium_ssl_arg(kwargs)
+                return original_sync_launch(self, *args, **kwargs)
+
+            def _sync_new_page_with_ssl(self, *args, **kwargs):
+                if insecure_ssl:
+                    kwargs.setdefault("ignore_https_errors", True)
+                return original_sync_new_page(self, *args, **kwargs)
+
+            def _sync_new_context_with_ssl(self, *args, **kwargs):
+                if insecure_ssl:
+                    kwargs.setdefault("ignore_https_errors", True)
+                return original_sync_new_context(self, *args, **kwargs)
+
+            SyncBrowserType.launch = _sync_launch_with_proxy
+            SyncBrowser.new_page = _sync_new_page_with_ssl
+            SyncBrowser.new_context = _sync_new_context_with_ssl
+            playwright_patches.extend([
+                (SyncBrowserType, "launch", original_sync_launch),
+                (SyncBrowser, "new_page", original_sync_new_page),
+                (SyncBrowser, "new_context", original_sync_new_context),
+            ])
+        except Exception:
+            pass
+
+    _patch_playwright()
+
     try:
         yield
     finally:
         if aiohttp and original_session:
             aiohttp.ClientSession = original_session  # type: ignore[assignment]
+        for owner, attr, original in reversed(playwright_patches):
+            setattr(owner, attr, original)
         for key, value in original_env.items():
             if value is None:
                 os.environ.pop(key, None)

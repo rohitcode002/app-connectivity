@@ -27,7 +27,7 @@ DOWNLOAD_LIMIT = 10  # default: 5 PDFs per scraper/type
 DOWNLOAD_ALL = False  # True downloads every available PDF and ignores DOWNLOAD_LIMIT
 
 # Proxy settings for VM downloader
-PROXY_ENABLED = False
+PROXY_ENABLED = True
 PROXY_URL = "http://cloudproxy.adani.com:8080"
 PROXY_INSECURE_SSL = True
 

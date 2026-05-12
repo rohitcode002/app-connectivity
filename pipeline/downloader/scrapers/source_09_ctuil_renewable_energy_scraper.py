@@ -19,6 +19,7 @@ CACHE_SOURCE_KEY = "bayallocation"
 CACHE_SOURCE_NAME = "CTUIL-Renewable-Energy"
 
 DOWNLOAD_SEM = asyncio.Semaphore(10)
+PAGE_TIMEOUT_MS = int(os.getenv("CTUIL_PAGE_TIMEOUT_MS", "90000"))
 
 
 def safe_filename(url: str) -> str:
@@ -77,8 +78,8 @@ async def extract_links():
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
-        await page.goto(BASE_URL)
-        await page.wait_for_selector("table")
+        await page.goto(BASE_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
+        await page.wait_for_selector("table", timeout=PAGE_TIMEOUT_MS)
 
         data = await page.evaluate("""() => {
             const result = {

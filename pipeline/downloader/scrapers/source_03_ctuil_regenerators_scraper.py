@@ -22,6 +22,7 @@ CACHE_SOURCE_KEY = "effectiveness"
 CACHE_SOURCE_NAME = "CTUIL-Regenerators-Effective-Date-wise"
 
 DOWNLOAD_SEM = asyncio.Semaphore(10)
+PAGE_TIMEOUT_MS = int(os.getenv("CTUIL_PAGE_TIMEOUT_MS", "90000"))
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -58,10 +59,10 @@ async def fetch_rendered_html() -> str:
         page = await browser.new_page()
 
         # Use domcontentloaded — site never reaches networkidle
-        await page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=30000)
+        await page.goto(PAGE_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
 
         # Wait for table with PDF links to appear
-        await page.wait_for_selector("table a[href]", timeout=15000)
+        await page.wait_for_selector("table a[href]", timeout=PAGE_TIMEOUT_MS)
 
         html = await page.content()
         await browser.close()
