@@ -1,0 +1,82 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+env/
+.env
+
+# ─── Input source folders (PDF data — not version-controlled) ─────────────────
+source/
+source/cmets_pdfs/
+source/cmets_pdfs/agenda/
+source/cmets_pdfs/minutes/
+source/effectiveness_pdfs/
+source/jcc_pdfs/
+source/bayallocation/
+
+# Legacy source folders (if still present)
+source_1/
+CTUIL-Regenerators-Effective-Date-wise/
+app-connectivity-pdfs/
+minutes_pdfs/
+page_chunks/
+
+# ─── Output / cache folders (generated at runtime) ────────────────────────────
+output/
+source_output/
+output/cmets_cache/
+output/effectiveness_cache/
+output/jcc_cache/
+output/bayallocation_cache/
+
+# ─── Generated JSON output ────────────────────────────────────────────────────
+output/cmets_effectiveness_mapped.json
+output/cmets_bay_mapped.json
+effectiveness_mapped.json
+
+# Legacy output folders (if still present)
+source_1_output/
+effectiveness_output/
+jcc_output/
+
+# ─── Generated Excel reports (all in excels/) ─────────────────────────────────
+excels/
+
+# ─── Old root-level outputs (if any still exist) ──────────────────────────────
+cmets.xlsx
+effectiveness_combined.xlsx
+effectiveness_mapped.xlsx
+output.xlsx
+output.json
+final_output.xlsx
+
+# ─── SQLite tracker database (runtime generated) ──────────────────────────────
+pipeline_tracker.db
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+
+# ─── Standalone scraper upload output ─────────────────────────────────────────
+uploads/
+
+# ─── VM script ────────────────────────────────────────────────────────────────
+llm_client.bat
+
+# ─── IDE / OS ─────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
