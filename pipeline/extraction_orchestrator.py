@@ -191,10 +191,10 @@ def get_extraction_sources(start_dir: Path | None = None) -> list[ExtractionSour
             flatten=True,
         ),
         ExtractionSource(
-            name="CTUIL-GNA-Connectivity-Fresh",
+            name="CTUIL-Regenerators-Effective-Date-wise",
             key="effectiveness",
             handler="effectiveness",
-            source_dir=output_root / "CTUIL-GNA-Connectivity-Fresh",
+            source_dir=output_root / "CTUIL-Regenerators-Effective-Date-wise",
             fallback_dir=source_root / "effectiveness_pdfs",
             output_dir=output_cache / "effectiveness_cache",
             excel_path=excel_root / "02_effectiveness_extracted.xlsx",

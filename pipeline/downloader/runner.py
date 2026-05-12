@@ -104,7 +104,7 @@ def _patched_attrs(module: ModuleType, patches: dict[str, object]):
 
 @contextmanager
 def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
-    if not proxy_url:
+    if not proxy_url and not insecure_ssl:
         yield
         return
 
@@ -114,10 +114,11 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
         "http_proxy": os.getenv("http_proxy"),
         "https_proxy": os.getenv("https_proxy"),
     }
-    os.environ["HTTP_PROXY"] = proxy_url
-    os.environ["HTTPS_PROXY"] = proxy_url
-    os.environ["http_proxy"] = proxy_url
-    os.environ["https_proxy"] = proxy_url
+    if proxy_url:
+        os.environ["HTTP_PROXY"] = proxy_url
+        os.environ["HTTPS_PROXY"] = proxy_url
+        os.environ["http_proxy"] = proxy_url
+        os.environ["https_proxy"] = proxy_url
 
     try:
         import aiohttp  # local import to avoid hard dependency at module import time
@@ -125,6 +126,7 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
         aiohttp = None
 
     original_session = getattr(aiohttp, "ClientSession", None) if aiohttp else None
+    original_requests_request = None
     playwright_patches: list[tuple[object, str, object]] = []
 
     if aiohttp and original_session:
@@ -136,9 +138,23 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
 
         aiohttp.ClientSession = _client_session_with_proxy  # type: ignore[assignment]
 
+    if insecure_ssl:
+        try:
+            import requests
+
+            original_requests_request = requests.sessions.Session.request
+
+            def _request_with_insecure_ssl(self, method, url, **kwargs):
+                kwargs.setdefault("verify", False)
+                return original_requests_request(self, method, url, **kwargs)
+
+            requests.sessions.Session.request = _request_with_insecure_ssl
+        except Exception:
+            pass
+
     def _patch_playwright() -> None:
         """Make scraper-owned browser launches use the configured VM proxy."""
-        proxy = {"server": proxy_url}
+        proxy = {"server": proxy_url} if proxy_url else None
 
         def _add_chromium_ssl_arg(kwargs: dict) -> None:
             if not insecure_ssl:
@@ -157,7 +173,8 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
             original_async_new_context = AsyncBrowser.new_context
 
             async def _async_launch_with_proxy(self, *args, **kwargs):
-                kwargs.setdefault("proxy", proxy)
+                if proxy:
+                    kwargs.setdefault("proxy", proxy)
                 _add_chromium_ssl_arg(kwargs)
                 return await original_async_launch(self, *args, **kwargs)
 
@@ -191,7 +208,8 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
             original_sync_new_context = SyncBrowser.new_context
 
             def _sync_launch_with_proxy(self, *args, **kwargs):
-                kwargs.setdefault("proxy", proxy)
+                if proxy:
+                    kwargs.setdefault("proxy", proxy)
                 _add_chromium_ssl_arg(kwargs)
                 return original_sync_launch(self, *args, **kwargs)
 
@@ -223,6 +241,13 @@ def _proxy_context(proxy_url: str | None, *, insecure_ssl: bool = False):
     finally:
         if aiohttp and original_session:
             aiohttp.ClientSession = original_session  # type: ignore[assignment]
+        if original_requests_request:
+            try:
+                import requests
+
+                requests.sessions.Session.request = original_requests_request
+            except Exception:
+                pass
         for owner, attr, original in reversed(playwright_patches):
             setattr(owner, attr, original)
         for key, value in original_env.items():

@@ -54,6 +54,7 @@ def load_runtime_config(
     llm_script_override: Optional[str] = None,
     download_limit_override: Optional[int] = None,
     download_all_override: Optional[bool] = None,
+    require_api_key: bool = True,
 ) -> RuntimeConfig:
     """
     Resolve runtime config from .env + CLI overrides.
@@ -68,6 +69,9 @@ def load_runtime_config(
     - LLM_SCRIPT_PATH
     - DOWNLOAD_LIMIT
     - DOWNLOAD_ALL
+    - PROXY_ENABLED
+    - PROXY_URL
+    - PROXY_INSECURE_SSL
     """
     load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=False)
 
@@ -115,7 +119,7 @@ def load_runtime_config(
     if download_all:
         dl_limit = -1
 
-    if not vm_mode and not api_key:
+    if require_api_key and not vm_mode and not api_key:
         raise SystemExit(
             "ERROR: OPENAI_API_KEY is required in laptop mode. "
             "Set EXECUTION_TARGET=vm (or VM=true) to use VM script mode."

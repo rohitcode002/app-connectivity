@@ -32,10 +32,11 @@ def main() -> None:
     runtime = load_runtime_config(
         download_limit_override=args.download_limit,
         download_all_override=args.download_all,
+        require_api_key=False,
     )
 
     output_root = Path(args.download_output_dir).resolve() if args.download_output_dir else _START_DIR / "output"
-    selected = ["cmets", "jcc", "effectiveness", "bayallocation"]
+    selected = None
     if args.download_scrapers:
         selected = [part.strip() for part in args.download_scrapers.split(",") if part.strip()]
 
