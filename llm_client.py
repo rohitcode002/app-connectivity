@@ -53,16 +53,19 @@ def call_vm_batch(prompt_payload: dict[str, Any], script_path: Optional[str] = N
             command,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=os.environ.copy(),
             check=False,
         )
 
         if result.returncode != 0:
+            stderr = (result.stderr or "").strip()
             raise RuntimeError(
-                f"LLM VM script failed (exit {result.returncode}): {result.stderr.strip()}"
+                f"LLM VM script failed (exit {result.returncode}): {stderr}"
             )
 
-        raw = result.stdout.strip()
+        raw = (result.stdout or "").strip()
         if not raw:
             raise RuntimeError("LLM VM script returned empty output.")
 

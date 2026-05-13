@@ -39,6 +39,8 @@ def main() -> None:
     selected = None
     if args.download_scrapers:
         selected = [part.strip() for part in args.download_scrapers.split(",") if part.strip()]
+    elif runtime.source_names:
+        selected = list(runtime.source_names)
 
     proxy_url = runtime.proxy_url if runtime.vm_mode and runtime.proxy_enabled else None
     proxy_insecure_ssl = bool(runtime.proxy_insecure_ssl)
@@ -53,6 +55,7 @@ def main() -> None:
             pfccl_query=args.pfccl_query,
             proxy_url=proxy_url,
             proxy_insecure_ssl=proxy_insecure_ssl,
+            regions=runtime.source_regions,
         )
 
     total = sum(results.values()) if results else 0

@@ -76,6 +76,31 @@ def _resolve_pdf_path(source_dir: Path, pdf_name: str) -> Path | None:
     return None
 
 
+def _normalize_region_name(name: str) -> str:
+    return " ".join(str(name).lower().replace("_", " ").replace("-", " ").split())
+
+
+def _path_matches_regions(pdf_path: Path, regions: Iterable[str] | None) -> bool:
+    selected = {_normalize_region_name(region) for region in (regions or []) if str(region).strip()}
+    if not selected:
+        return True
+
+    known_regions = {
+        "eastern region",
+        "north eastern region",
+        "northern region",
+        "southern region",
+        "western region",
+    }
+    path_regions = {
+        norm
+        for part in pdf_path.parts
+        for norm in [_normalize_region_name(part)]
+        if norm in known_regions
+    }
+    return not path_regions or bool(path_regions & selected)
+
+
 def _seed_cache_from_source(cache, source_name: str, source_dir: Path) -> None:
     entries = []
     for pdf in source_dir.rglob("*.pdf"):
@@ -86,7 +111,11 @@ def _seed_cache_from_source(cache, source_name: str, source_dir: Path) -> None:
     cache.record_existing_pdfs(entries)
 
 
-def _collect_pending(source: ExtractionSource, db_path: Path) -> list[PendingPdf]:
+def _collect_pending(
+    source: ExtractionSource,
+    db_path: Path,
+    regions: Iterable[str] | None = None,
+) -> list[PendingPdf]:
     cache = get_pdf_cache(db_path, source.key, source.name)
     active_dir = _resolve_source_dir(source.source_dir, source.fallback_dir)
     _seed_cache_from_source(cache, source.name, active_dir)
@@ -103,6 +132,8 @@ def _collect_pending(source: ExtractionSource, db_path: Path) -> list[PendingPdf
             pdf_path = _resolve_pdf_path(active_dir, pdf_name)
         if pdf_path is None:
             continue
+        if not _path_matches_regions(pdf_path, regions):
+            continue
         inferred_type = _infer_type(source.name, pdf_path, pdf_type)
         if source.allow_types and inferred_type not in source.allow_types:
             continue
@@ -110,12 +141,14 @@ def _collect_pending(source: ExtractionSource, db_path: Path) -> list[PendingPdf
     return pending
 
 
-def _collect_available(source: ExtractionSource) -> list[PendingPdf]:
+def _collect_available(source: ExtractionSource, regions: Iterable[str] | None = None) -> list[PendingPdf]:
     """Collect source PDFs for rebuilding an Excel from existing JSON/source data."""
     active_dir = _resolve_source_dir(source.source_dir, source.fallback_dir)
     available: list[PendingPdf] = []
     for pdf_path in sorted(active_dir.rglob("*.pdf")):
         if not pdf_path.is_file():
+            continue
+        if not _path_matches_regions(pdf_path, regions):
             continue
         inferred_type = _infer_type(source.name, pdf_path, "")
         if source.allow_types and inferred_type not in source.allow_types:
@@ -176,13 +209,18 @@ def _run_source_runner(source: ExtractionSource, runtime: RuntimeConfig, pdfs: l
         tmp_ctx.cleanup()
 
 
-def extract_pending_for_source(source: ExtractionSource, runtime: RuntimeConfig, db_path: Path) -> dict:
-    pending = _collect_pending(source, db_path)
+def extract_pending_for_source(
+    source: ExtractionSource,
+    runtime: RuntimeConfig,
+    db_path: Path,
+    regions: Iterable[str] | None = None,
+) -> dict:
+    pending = _collect_pending(source, db_path, regions=regions)
     if not pending:
         if source.excel_path.exists():
             return {"source": source.name, "pending": 0, "extracted": 0}
 
-        available = _collect_available(source)
+        available = _collect_available(source, regions=regions)
         if not available:
             return {"source": source.name, "pending": 0, "extracted": 0}
 
@@ -260,10 +298,16 @@ def get_extraction_sources(start_dir: Path | None = None) -> list[ExtractionSour
     ]
 
 
-def run_pending_extractions(runtime: RuntimeConfig, only_sources: Iterable[str] | None = None) -> list[dict]:
+def run_pending_extractions(
+    runtime: RuntimeConfig,
+    only_sources: Iterable[str] | None = None,
+    regions: Iterable[str] | None = None,
+) -> list[dict]:
     db_path = _START_DIR / "pipeline_tracker.db"
     sources = get_extraction_sources(_START_DIR)
-    if only_sources:
-        selected = {name.strip() for name in only_sources if name.strip()}
+    selected_sources = list(only_sources or runtime.source_names or [])
+    if selected_sources:
+        selected = {name.strip() for name in selected_sources if name.strip()}
         sources = [s for s in sources if s.name in selected or s.key in selected or s.handler in selected]
-    return [extract_pending_for_source(source, runtime, db_path) for source in sources]
+    selected_regions = list(regions or runtime.source_regions or [])
+    return [extract_pending_for_source(source, runtime, db_path, regions=selected_regions) for source in sources]

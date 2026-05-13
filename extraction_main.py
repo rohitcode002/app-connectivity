@@ -36,7 +36,11 @@ def main() -> None:
     if args.sources:
         only_sources = [part.strip() for part in args.sources.split(",") if part.strip()]
 
-    results = run_pending_extractions(runtime, only_sources=only_sources)
+    results = run_pending_extractions(
+        runtime,
+        only_sources=only_sources,
+        regions=runtime.source_regions,
+    )
     print("\n" + "=" * 64)
     print("  EXTRACTION COMPLETE")
     for item in results:

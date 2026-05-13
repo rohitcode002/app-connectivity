@@ -35,6 +35,34 @@ def _limit_list(items, limit: int):
     return items[:limit]
 
 
+def _normalize_region_name(name: str) -> str:
+    return " ".join(str(name).lower().replace("_", " ").replace("-", " ").split())
+
+
+def _filter_by_regions(records, regions: Iterable[str] | None):
+    selected = {_normalize_region_name(region) for region in (regions or []) if str(region).strip()}
+    if not selected:
+        return records
+
+    if isinstance(records, dict):
+        return {
+            region: value
+            for region, value in records.items()
+            if _normalize_region_name(region) in selected
+        }
+
+    if isinstance(records, list):
+        return [
+            item
+            for item in records
+            if not isinstance(item, dict)
+            or not item.get("region")
+            or _normalize_region_name(item.get("region")) in selected
+        ]
+
+    return records
+
+
 def _count_pdfs(root: Path) -> set[Path]:
     if not root.exists():
         return set()
@@ -269,8 +297,14 @@ def _limit_mapping_values(mapping: dict, limit: int) -> dict:
     return trimmed
 
 
-def _build_limit_patches(module: ModuleType, spec: ScraperSpec, limit: int) -> dict[str, object]:
-    if limit < 0:
+def _build_limit_patches(
+    module: ModuleType,
+    spec: ScraperSpec,
+    limit: int,
+    regions: Iterable[str] | None = None,
+) -> dict[str, object]:
+    selected_regions = [region for region in (regions or []) if str(region).strip()]
+    if limit < 0 and not selected_regions:
         return {}
 
     patches: dict[str, object] = {}
@@ -279,12 +313,12 @@ def _build_limit_patches(module: ModuleType, spec: ScraperSpec, limit: int) -> d
         original = module.collect_all
 
         async def limited_collect_all(*args, **kwargs):
-            records = await original(*args, **kwargs)
+            records = _filter_by_regions(await original(*args, **kwargs), selected_regions)
             counts: dict[str, int] = defaultdict(int)
             limited = []
             for record in records:
                 doc_type = record.get("doc_type", "pdf")
-                if counts[doc_type] >= limit:
+                if limit >= 0 and counts[doc_type] >= limit:
                     continue
                 counts[doc_type] += 1
                 limited.append(record)
@@ -296,7 +330,8 @@ def _build_limit_patches(module: ModuleType, spec: ScraperSpec, limit: int) -> d
         original = module.collect_all
 
         async def limited_collect_all(*args, **kwargs):
-            return _limit_mapping_values(await original(*args, **kwargs), limit)
+            records = _filter_by_regions(await original(*args, **kwargs), selected_regions)
+            return _limit_mapping_values(records, limit)
 
         patches["collect_all"] = limited_collect_all
 
@@ -394,6 +429,7 @@ def run_scraper(
     pfccl_query: str | None = None,
     proxy_url: str | None = None,
     proxy_insecure_ssl: bool = False,
+    regions: Iterable[str] | None = None,
 ) -> int:
     """Run one copied scraper and return the number of newly saved PDFs."""
     root = Path(output_root).resolve() if output_root else DEFAULT_DOWNLOAD_ROOT
@@ -407,7 +443,7 @@ def run_scraper(
         seeded = _seed_cache_from_existing_pdfs(spec, output_dir, _cache_db_path(root, spec))
         patches = {
             **_build_output_patches(module, spec, root),
-            **_build_limit_patches(module, spec, limit),
+            **_build_limit_patches(module, spec, limit, regions=regions),
         }
         started = time.time()
         print(f"\n  [{spec.label}] -> {output_dir}")
@@ -434,6 +470,7 @@ def run_download_subpipeline(
     pfccl_query: str | None = None,
     proxy_url: str | None = None,
     proxy_insecure_ssl: bool = False,
+    regions: Iterable[str] | None = None,
 ) -> dict[str, int]:
     """Run the download phase for every selected scraper."""
     selected = list(scrapers) if scrapers else [spec.key for spec in SCRAPER_SPECS]
@@ -454,6 +491,7 @@ def run_download_subpipeline(
                 pfccl_query=pfccl_query,
                 proxy_url=proxy_url,
                 proxy_insecure_ssl=proxy_insecure_ssl,
+                regions=regions,
             )
         except Exception as exc:
             print(f"  [{spec.label}] FAILED: {exc}")

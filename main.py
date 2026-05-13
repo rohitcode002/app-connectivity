@@ -233,6 +233,8 @@ def _run_downloads(runtime, tracker: PipelineTracker, args) -> dict:
     selected = None
     if args.download_scrapers:
         selected = [part.strip() for part in args.download_scrapers.split(",") if part.strip()]
+    elif runtime.source_names:
+        selected = list(runtime.source_names)
 
     print("\n" + "=" * 64)
     print("  PHASE 0 — PDF DOWNLOAD")
@@ -253,6 +255,7 @@ def _run_downloads(runtime, tracker: PipelineTracker, args) -> dict:
             pfccl_query=args.pfccl_query,
             proxy_url=proxy_url,
             proxy_insecure_ssl=proxy_insecure_ssl,
+            regions=runtime.source_regions,
         )
     except Exception:
         logging.error("Download sub-pipeline failed.")
@@ -538,7 +541,11 @@ def main() -> None:
         only_sources = None
         if args.sources:
             only_sources = [part.strip() for part in args.sources.split(",") if part.strip()]
-        extraction_results = run_pending_extractions(runtime, only_sources=only_sources)
+        extraction_results = run_pending_extractions(
+            runtime,
+            only_sources=only_sources,
+            regions=runtime.source_regions,
+        )
 
         total_excels = len(list((_START_DIR / "excels").glob("*.xlsx")))
         total_extracted = sum(item.get("extracted", 0) for item in extraction_results)
