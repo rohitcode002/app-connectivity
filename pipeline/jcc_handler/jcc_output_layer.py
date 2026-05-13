@@ -253,7 +253,11 @@ def _row_id_match_count(row: dict, ids: list[str]) -> int:
     """Count how many IDs are found in any value of the JCC row."""
     if not row or not ids:
         return 0
-    normalized_values = [_normalize_id(v) for v in row.values() if v is not None]
+    priority_values = [
+        row.get("gna_lta_id"),
+        row.get("connectivity_applicant"),
+    ]
+    normalized_values = [_normalize_id(v) for v in priority_values + list(row.values()) if v is not None]
     count = 0
     for candidate in ids:
         cid = _normalize_id(candidate)
@@ -371,9 +375,16 @@ def _is_tgna_candidate(text: str) -> bool:
         return False
     if _is_effective(text):
         return False
-    # Any non-empty, non-effective text is a TGNA candidate
     norm = _normalize(text)
-    return len(norm) > 0
+    return (
+        "connectivity likely" in norm
+        or "operationalized upon commissioning" in norm
+        or "operationalised upon commissioning" in norm
+        or (
+            "commissioning of required" in norm
+            and "transmission system" in norm
+        )
+    )
 
 
 def _extract_all_mw(text: str) -> list[float]:
@@ -389,6 +400,32 @@ def _extract_all_mw(text: str) -> list[float]:
     for m in matches:
         try:
             values.append(float(m.replace(",", "")))
+        except ValueError:
+            continue
+    return values
+
+
+def _generation_block(text: str) -> str:
+    """Return the RE/Generation section before Dedicated system/DTL text."""
+    if not text:
+        return ""
+    match = re.search(
+        r"(?:\bre\s+generation\b|\bgeneration(?:\s*\(\s*mw\s*\))?)\s*:?(.*?)(?:\bdedicated\s+system\b|\bdtl\s*:|\bgeneration\s+pooling\s+station\b|$)",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return match.group(1) if match else text
+
+
+def _extract_cod_mw(text: str) -> list[float]:
+    """Extract MW values in the Generation block tagged as COD/CoD/DOCO."""
+    if not text:
+        return []
+    pattern = r"([\d,]+\.?\d*)\s*MW[^()]{0,100}?\(?\s*(?:CoD|COD|DOCO)\s*\)?"
+    values: list[float] = []
+    for match in re.findall(pattern, text, flags=re.IGNORECASE):
+        try:
+            values.append(float(match.replace(",", "")))
         except ValueError:
             continue
     return values
@@ -421,24 +458,30 @@ def _extract_commissioned_mw(text: str) -> list[float]:
 def compute_gna_tgna(jcc_row: dict) -> tuple[Optional[float], Optional[float]]:
     """Compute GNA and TGNA from a single matched JCC row.
 
-    Returns (gna_value, tgna_value).  Exactly one will be non-None
-    (or both None if data is insufficient).
-
-    Logic:
-      • GNA  — status is "Effective"
-               → sum ALL MW values in the schedule column (Generation MW / COD)
-      • TGNA — status is NOT "Effective" (pending transmission)
-               → sum only the MW values marked "(Commissioned)"
+    New JCC extraction writes ``total_COD``, ``COD_Found``,
+    ``effective_date``, ``TGNA`` and ``GNA`` directly into every JSON row.
+    Prefer those values so mapping stays a simple lookup. The older
+    text-based fallback remains for legacy caches.
     """
+    if "GNA" in jcc_row or "TGNA" in jcc_row or "COD_Found" in jcc_row:
+        if jcc_row.get("COD_Found") is False:
+            return None, None
+        gna_value = jcc_row.get("GNA")
+        tgna_value = jcc_row.get("TGNA")
+        return (
+            float(gna_value) if gna_value not in (None, "") else None,
+            float(tgna_value) if tgna_value not in (None, "") else None,
+        )
+
     connectivity_status = safe_str(jcc_row.get("connectivity_start_date_under_gna"))
-    schedule_text       = safe_str(jcc_row.get("schedule_as_per_current_jcc"))
+    schedule_text       = _generation_block(safe_str(jcc_row.get("schedule_as_per_current_jcc")))
 
     gna_value:  Optional[float] = None
     tgna_value: Optional[float] = None
 
     if _is_effective(connectivity_status):
         # ── GNA path ─────────────────────────────────────────────────────
-        mw_values = _extract_all_mw(schedule_text)
+        mw_values = _extract_cod_mw(schedule_text) or _extract_all_mw(schedule_text)
         if mw_values:
             gna_value = round(sum(mw_values), 2)
             logger.debug(
@@ -451,9 +494,10 @@ def compute_gna_tgna(jcc_row: dict) -> tuple[Optional[float], Optional[float]]:
         commissioned = _extract_commissioned_mw(schedule_text)
         if commissioned:
             tgna_value = round(sum(commissioned), 2)
+        if tgna_value is not None:
             logger.debug(
                 "[TGNA] status='%s'  commissioned MW=%s  → TGNA=%.2f",
-                connectivity_status[:60], commissioned, tgna_value,
+                connectivity_status[:60], commissioned or [tgna_value], tgna_value,
             )
 
     return gna_value, tgna_value
@@ -726,7 +770,40 @@ def extract_bay_no_from_jcc_ists_scope(jcc_row: Optional[dict]) -> str:
 
 
 
+def _id_in_jcc_id_fields(search_id: str, jcc_rows: list[dict]) -> Optional[dict]:
+    """Search for *search_id* inside JCC Connectivity Applicant.
+
+    ``gna_lta_id`` is derived only from that same Connectivity Applicant
+    cell, so checking it first is just a normalized fast path.
+
+    Returns the first matching JCC row, or None.
+
+    The search is case-insensitive and normalised (whitespace-collapsed,
+    special characters stripped) so that minor formatting differences in
+    the PDF extraction don't prevent a match.
+    """
+    if not search_id:
+        return None
+
+    needle = _normalize_id(search_id)
+    if len(needle) < 3:
+        return None
+
+    for row in jcc_rows:
+        id_bucket = safe_str(row.get("gna_lta_id"))
+        applicant_raw = safe_str(row.get("connectivity_applicant"))
+        haystack = _normalize_id("; ".join(part for part in [id_bucket, applicant_raw] if part))
+        if needle in haystack:
+            return row
+    return None
+
+
 def _id_in_connectivity_applicant(search_id: str, jcc_rows: list[dict]) -> Optional[dict]:
+    """Backward-compatible alias for older callers."""
+    return _id_in_jcc_id_fields(search_id, jcc_rows)
+
+
+def _legacy_id_in_connectivity_applicant(search_id: str, jcc_rows: list[dict]) -> Optional[dict]:
     """Search for *search_id* inside the `connectivity_applicant` column of
     every JCC row.  Returns the first matching JCC row, or None.
 
@@ -751,45 +828,81 @@ def _id_in_connectivity_applicant(search_id: str, jcc_rows: list[dict]) -> Optio
     return None
 
 
-def _find_jcc_by_ids(
-    gna_ids: list[str],
-    lta_ids: list[str],
-    enh52_ids: list[str],
+_CMETS_ID_COLUMN_CANDIDATES = {
+    "Application ID": [
+        "Application ID",
+        "Application No",
+        "Application No.",
+    ],
+    "GNA": [
+        "GNA Application ID",
+        "GNA Application No",
+        "GNA Application No.",
+        "GNA/ST II Application ID",
+        "GNA ST II Application ID",
+        "GNA ST-II Application ID",
+    ],
+    "LTA": [
+        "LTA Application ID",
+        "LTA Application No",
+        "LTA Application No.",
+        "LTA No",
+    ],
+    "5.2": [
+        "Application ID under Enhancement 5.2 or revision",
+        "Application ID under Enhancement 5.2",
+        "Enhancement 5.2 Application ID",
+        "5.2 Application ID",
+    ],
+}
+
+
+def _normalize_column_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", safe_str(name).lower())
+
+
+def _find_all_matching_cols(df: pd.DataFrame, candidates: list[str]) -> list[str]:
+    wanted = {_normalize_column_name(candidate) for candidate in candidates}
+    return [col for col in df.columns if _normalize_column_name(col) in wanted]
+
+
+def _collect_cmets_id_columns(df: pd.DataFrame) -> list[tuple[str, str]]:
+    """Return ordered (source_label, column_name) pairs for all CMETS ID columns."""
+    pairs: list[tuple[str, str]] = []
+    seen_cols: set[str] = set()
+    for source, candidates in _CMETS_ID_COLUMN_CANDIDATES.items():
+        for col in _find_all_matching_cols(df, candidates):
+            if col in seen_cols:
+                continue
+            seen_cols.add(col)
+            pairs.append((source, col))
+    return pairs
+
+
+def _candidate_ids_from_cmets_row(row: pd.Series, id_columns: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Return ordered (source_label, id_value) candidates from one CMETS row."""
+    candidates: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for source, col in id_columns:
+        for raw_id in _split_ids(row.get(col)):
+            norm = _normalize_id(raw_id)
+            if len(norm) < 3 or norm in seen:
+                continue
+            seen.add(norm)
+            candidates.append((source, raw_id))
+    return candidates
+
+
+def _find_jcc_by_any_cmets_id(
+    id_candidates: list[tuple[str, str]],
     jcc_rows: list[dict],
-) -> tuple[Optional[dict], str]:
-    """Try to find a matching JCC row using the cascading priority:
-
-        1. GNA Application IDs
-        2. LTA Application IDs
-        3. Enhancement 5.2 Application IDs
-
-    Each ID is searched against the *connectivity_applicant* column of
-    every JCC row.
-
-    Returns
-    -------
-    (matched_jcc_row | None, match_source)
-        match_source is one of "GNA", "LTA", "5.2", or "" if no match.
-    """
-    # Priority 1 — GNA
-    for gid in gna_ids:
-        match = _id_in_connectivity_applicant(gid, jcc_rows)
+) -> tuple[Optional[dict], str, str]:
+    """Search every CMETS ID candidate in JCC Connectivity Applicant."""
+    for source, candidate_id in id_candidates:
+        match = _id_in_jcc_id_fields(candidate_id, jcc_rows)
         if match is not None:
-            return match, "GNA"
-
-    # Priority 2 — LTA
-    for lid in lta_ids:
-        match = _id_in_connectivity_applicant(lid, jcc_rows)
-        if match is not None:
-            return match, "LTA"
-
-    # Priority 3 — Enhancement 5.2
-    for eid in enh52_ids:
-        match = _id_in_connectivity_applicant(eid, jcc_rows)
-        if match is not None:
-            return match, "5.2"
-
-    return None, ""
+            return match, source, candidate_id
+    return None, "", ""
 
 
 def run_layer4_excel(
@@ -804,13 +917,10 @@ def run_layer4_excel(
 
     **Approach** (CMETS-first):
       1. Load the CMETS extracted sheet as the base.
-      2. For each row, pick the GNA Application ID → search JCC extracted
-         data's ``connectivity_applicant`` column.
-      3. If GNA not found → try LTA Application ID.
-      4. If LTA not found → try "Application ID under Enhancement 5.2".
-      5. When a match is found → compute GNA / TGNA from the JCC row and
-         write the values into the output.
-      6. Output includes ALL CMETS columns + TGNA, GNA, Match Source.
+      2. For each CMETS row, collect every application / GNA / GNA ST-II / LTA / 5.2 ID.
+      3. Search each ID in JCC ``connectivity_applicant``.
+      4. When a match is found, copy TGNA / GNA from that JCC row.
+      5. Output includes every CMETS row, even when no JCC match is found.
 
     Parameters
     ----------
@@ -864,6 +974,7 @@ def run_layer4_excel(
         df["TGNA"] = None
         df["GNA"]  = None
         df["Match Source"] = None
+        df["Matched JCC ID"] = None
         df["Bay No (JCC)"] = None
         df.to_excel(str(xlsx_out), index=False, sheet_name="CMETS JCC Mapped")
         print(f"  Excel → {xlsx_out}")
@@ -871,49 +982,43 @@ def run_layer4_excel(
         return df
 
     # ── Identify ID columns in CMETS ─────────────────────────────────────
-    col_gna = _find_col(df, "GNA/ST II Application ID", "GNA ST II Application ID",
-                        "GNA Application ID", "GNA Application No")
-    col_lta = _find_col(df, "LTA Application ID", "LTA Application No", "LTA No")
-    col_52  = _find_col(df, "Application ID under Enhancement 5.2 or revision",
-                        "Application ID under Enhancement 5.2",
-                        "Enhancement 5.2 Application ID")
-
-    print(f"  GNA ID col   : {col_gna}")
-    print(f"  LTA ID col   : {col_lta}")
-    print(f"  5.2 ID col   : {col_52}")
+    id_columns = _collect_cmets_id_columns(df)
+    print("  CMETS ID cols:")
+    for source, col in id_columns:
+        print(f"    {source:<3} → {col}")
     print("-" * 64)
 
     # ── Match each CMETS row → JCC connectivity_applicant ─────────────────
     tgna_values:  list[Optional[float]] = []
     gna_values:   list[Optional[float]] = []
     match_sources: list[str]            = []
+    matched_ids: list[str]              = []
     jcc_bay_values: list[str]           = []
 
     matched_count = 0
     gna_count     = 0
     tgna_count    = 0
     jcc_bay_count = 0
-    match_by      = {"GNA": 0, "LTA": 0, "5.2": 0}
+    match_by      = {"Application ID": 0, "GNA": 0, "LTA": 0, "5.2": 0}
 
     for idx, row in df.iterrows():
-        gna_ids   = _split_ids(row.get(col_gna))   if col_gna else []
-        lta_ids   = _split_ids(row.get(col_lta))   if col_lta else []
-        enh52_ids = _split_ids(row.get(col_52))    if col_52  else []
+        id_candidates = _candidate_ids_from_cmets_row(row, id_columns)
 
-        if not gna_ids and not lta_ids and not enh52_ids:
+        if not id_candidates:
             tgna_values.append(None)
             gna_values.append(None)
             match_sources.append("")
+            matched_ids.append("")
             jcc_bay_values.append("")
             continue
 
-        # Cascading search: GNA → LTA → 5.2 in connectivity_applicant
-        jcc_match, source = _find_jcc_by_ids(gna_ids, lta_ids, enh52_ids, jcc_rows)
+        jcc_match, source, matched_id = _find_jcc_by_any_cmets_id(id_candidates, jcc_rows)
 
         if jcc_match is None:
             tgna_values.append(None)
             gna_values.append(None)
             match_sources.append("")
+            matched_ids.append("")
             jcc_bay_values.append("")
             continue
 
@@ -931,6 +1036,7 @@ def run_layer4_excel(
         tgna_values.append(tgna_val)
         gna_values.append(gna_val)
         match_sources.append(source)
+        matched_ids.append(matched_id)
 
         jcc_bay_no = extract_bay_no_from_jcc_ists_scope(jcc_match)
         if jcc_bay_no:
@@ -941,12 +1047,14 @@ def run_layer4_excel(
     df["TGNA"]         = tgna_values
     df["GNA"]          = gna_values
     df["Match Source"] = match_sources
+    df["Matched JCC ID"] = matched_ids
     df["Bay No (JCC)"] = jcc_bay_values
 
     # ── Write Excel ───────────────────────────────────────────────────────
     print(f"\n  Layer 4 Results:")
     print(f"    Total CMETS rows          : {len(df)}")
     print(f"    Matched to JCC            : {matched_count}")
+    print(f"      via Application ID      : {match_by.get('Application ID', 0)}")
     print(f"      via GNA ID              : {match_by.get('GNA', 0)}")
     print(f"      via LTA ID              : {match_by.get('LTA', 0)}")
     print(f"      via 5.2 Enhancement ID  : {match_by.get('5.2', 0)}")
@@ -966,6 +1074,7 @@ def run_layer4_excel(
         summary_rows = [
             ("Total CMETS rows",        len(df)),
             ("Matched to JCC",          matched_count),
+            ("  via Application ID",    match_by.get("Application ID", 0)),
             ("  via GNA ID",            match_by.get("GNA", 0)),
             ("  via LTA ID",            match_by.get("LTA", 0)),
             ("  via 5.2 Enhancement",   match_by.get("5.2", 0)),

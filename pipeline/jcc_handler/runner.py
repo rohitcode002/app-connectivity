@@ -26,7 +26,7 @@ import pandas as pd
 
 from config import RuntimeConfig, load_runtime_config
 from pipeline.excel_utils import export_to_excel
-from pipeline.jcc_handler.models import COLUMN_NAMES
+from pipeline.jcc_handler.models import EXCEL_COLUMN_NAMES
 from pipeline.jcc_handler.extraction import extract_jcc_pdf
 from pipeline.jcc_handler.jcc_output_layer import run_jcc_output_layer, run_layer4_excel
 
@@ -55,6 +55,18 @@ def _save_json(data: dict, path: Path) -> None:
 def _load_json(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _has_current_jcc_schema(data: dict) -> bool:
+    """Return True when cached JCC rows already contain the new derived fields."""
+    required = {"total_COD", "COD_Found", "effective_date", "TGNA", "GNA"}
+    saw_row = False
+    for page in data.get("pages", []):
+        for row in page.get("rows", []):
+            saw_row = True
+            if not required.issubset(row.keys()):
+                return False
+    return saw_row or data.get("total_matching_pages", 0) == 0
 
 
 def _flatten(all_results: list[dict]) -> list[dict]:
@@ -158,15 +170,19 @@ def run_jcc_extraction(
         cache = _cache_path(pdf_path.name, out)
 
         if cache.exists():
-            print(f"\n  [{idx}/{len(pdf_files)}] SKIP    {pdf_path.name}")
-            all_results.append(_load_json(cache))
-            continue
+            cached = _load_json(cache)
+            if _has_current_jcc_schema(cached):
+                print(f"\n  [{idx}/{len(pdf_files)}] SKIP    {pdf_path.name}")
+                all_results.append(cached)
+                continue
+            print(f"\n  [{idx}/{len(pdf_files)}] REFRESH {pdf_path.name} (stale JCC schema)")
+        else:
+            print(f"\n  [{idx}/{len(pdf_files)}] EXTRACT {pdf_path.name}")
 
-        print(f"\n  [{idx}/{len(pdf_files)}] EXTRACT {pdf_path.name}")
         print("-" * 48)
 
         try:
-            pages = extract_jcc_pdf(str(pdf_path))
+            pages = extract_jcc_pdf(str(pdf_path), runtime=runtime)
         except Exception as exc:
             logger.error("[JCC] Failed %s: %s", pdf_path.name, exc)
             print(f"  ERROR   {pdf_path.name}: {exc}")
@@ -202,7 +218,7 @@ def run_jcc_extraction(
     df = pd.DataFrame(flat_rows)
 
     # Excel column order
-    col_order = ["source_pdf", "page_number"] + [c for c in COLUMN_NAMES if c in df.columns]
+    col_order = ["source_pdf", "page_number"] + [c for c in EXCEL_COLUMN_NAMES if c in df.columns]
     export_to_excel(
         rows         = flat_rows,
         output_path  = xlsx,

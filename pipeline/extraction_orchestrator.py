@@ -144,11 +144,16 @@ def extract_pending_for_source(source: ExtractionSource, runtime: RuntimeConfig,
                 runtime=runtime,
             )
         elif source.runner is run_jcc_extraction:
+            excel_root = source.excel_path.parent
             source.runner(
                 source_dir=str(temp_dir),
                 output_dir=str(source.output_dir),
                 excel_path=str(source.excel_path),
                 runtime=runtime,
+                jcc_output_excel_path=str(excel_root / "04_jcc_output_layer.xlsx"),
+                jcc_mapped_excel_path=str(excel_root / "04_jcc_extracted_mapped.xlsx"),
+                layer4_excel_path=str(excel_root / "04_cmets_jcc_mapped.xlsx"),
+                cmets_excel_path=str(excel_root / "01_cmets_extracted.xlsx"),
             )
         else:
             source.runner(

@@ -20,15 +20,26 @@ TARGET_COLUMN_FRAGMENTS = [
     "connectivity start",
 ]
 
-# Canonical column names exposed in JSON output
+# Raw table columns exposed in JSON output. Keep these narrow: JCC extraction
+# should copy the PDF cells, then add derived COD/GNA/TGNA columns.
 COLUMN_NAMES = [
-    "sr_no",
     "pooling_station",
     "connectivity_applicant",
     "connectivity_quantum_mw",
-    "gen_comm_schedule_prev_jcc",
     "schedule_as_per_current_jcc",
-    "schedule_current_jcc_ists_scope",
     "connectivity_start_date_under_gna",
-    "remarks",
 ]
+
+# Values computed after extraction from the schedule columns.
+COMPUTED_COLUMN_NAMES = [
+    "total_COD",
+    "COD_Found",
+    "effective_date",
+    "TGNA",
+    "GNA",
+    # Compatibility fields used by the matching layers.
+    "substation",
+    "gna_lta_id",
+]
+
+EXCEL_COLUMN_NAMES = COLUMN_NAMES + COMPUTED_COLUMN_NAMES
