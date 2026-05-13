@@ -110,6 +110,20 @@ def _collect_pending(source: ExtractionSource, db_path: Path) -> list[PendingPdf
     return pending
 
 
+def _collect_available(source: ExtractionSource) -> list[PendingPdf]:
+    """Collect source PDFs for rebuilding an Excel from existing JSON/source data."""
+    active_dir = _resolve_source_dir(source.source_dir, source.fallback_dir)
+    available: list[PendingPdf] = []
+    for pdf_path in sorted(active_dir.rglob("*.pdf")):
+        if not pdf_path.is_file():
+            continue
+        inferred_type = _infer_type(source.name, pdf_path, "")
+        if source.allow_types and inferred_type not in source.allow_types:
+            continue
+        available.append(PendingPdf(pdf_name=pdf_path.name, pdf_type=inferred_type, pdf_path=pdf_path))
+    return available
+
+
 def _prepare_temp_dir(pdfs: Iterable[PendingPdf], flatten: bool) -> tuple[TemporaryDirectory, Path]:
     tmp = TemporaryDirectory()
     root = Path(tmp.name)
@@ -129,12 +143,8 @@ def _cache_path_for(output_dir: Path, pdf_name: str) -> Path:
     return output_dir / f"{Path(pdf_name).stem}.json"
 
 
-def extract_pending_for_source(source: ExtractionSource, runtime: RuntimeConfig, db_path: Path) -> dict:
-    pending = _collect_pending(source, db_path)
-    if not pending:
-        return {"source": source.name, "pending": 0, "extracted": 0}
-
-    tmp_ctx, temp_dir = _prepare_temp_dir(pending, source.flatten)
+def _run_source_runner(source: ExtractionSource, runtime: RuntimeConfig, pdfs: list[PendingPdf]) -> None:
+    tmp_ctx, temp_dir = _prepare_temp_dir(pdfs, source.flatten)
     try:
         if source.runner is run_cmets_extraction:
             source.runner(
@@ -164,6 +174,23 @@ def extract_pending_for_source(source: ExtractionSource, runtime: RuntimeConfig,
             )
     finally:
         tmp_ctx.cleanup()
+
+
+def extract_pending_for_source(source: ExtractionSource, runtime: RuntimeConfig, db_path: Path) -> dict:
+    pending = _collect_pending(source, db_path)
+    if not pending:
+        if source.excel_path.exists():
+            return {"source": source.name, "pending": 0, "extracted": 0}
+
+        available = _collect_available(source)
+        if not available:
+            return {"source": source.name, "pending": 0, "extracted": 0}
+
+        print(f"\n[Extraction] Rebuilding missing Excel for {source.name}: {source.excel_path}")
+        _run_source_runner(source, runtime, available)
+        return {"source": source.name, "pending": 0, "extracted": 0, "excel_rebuilt": 1}
+
+    _run_source_runner(source, runtime, pending)
 
     cache = get_pdf_cache(db_path, source.key, source.name)
     extracted = 0
