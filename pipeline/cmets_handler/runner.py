@@ -108,6 +108,7 @@ def run_cmets_extraction(
     excel_path:  Path | str | None = None,
     single_pdf:  Optional[str] = None,
     runtime:     Optional[RuntimeConfig] = None,
+    max_pages:   int = -1,
 ) -> Path:
     """Discover CMETS PDFs → extract (skip cached) → dump JSON → write cmets.xlsx.
 
@@ -146,6 +147,7 @@ def run_cmets_extraction(
     print(f"  Cached (skip)  : {cached}")
     print(f"  To extract     : {len(pdf_paths) - cached}")
     print(f"  Mode           : {runtime.execution_target}")
+    print(f"  Max pages/PDF  : {max_pages if max_pages != -1 else 'ALL'}")
     print("=" * 64)
 
     started_at = datetime.now()
@@ -178,6 +180,7 @@ def run_cmets_extraction(
             api_key=runtime.api_key or None,
             vm_mode=runtime.vm_mode,
             llm_script_path=runtime.llm_script_path,
+            max_pages=max_pages,
         )
         data = _serialize(result, meeting_meta=meeting_meta.as_row_dict())
         _save_json(data, cache)

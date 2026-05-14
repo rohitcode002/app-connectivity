@@ -64,6 +64,7 @@ def run_effectiveness_extraction(
     output_dir:  Path | str | None = None,
     excel_path:  Path | str | None = None,
     runtime:     Optional[RuntimeConfig] = None,
+    max_pages:   int = -1,
 ) -> pd.DataFrame:
     """Discover effectiveness PDFs → extract (skip cached) → dump JSON → write Excel.
 
@@ -100,6 +101,7 @@ def run_effectiveness_extraction(
     print(f"  Cached      : {cached_count}  (will be skipped)")
     print(f"  To extract  : {len(pdf_files) - cached_count}")
     print(f"  Mode        : {runtime.execution_target}")
+    print(f"  Max pages   : {max_pages if max_pages != -1 else 'ALL'}")
     print("=" * 64)
 
     for pdf_path in pdf_files:
@@ -110,9 +112,9 @@ def run_effectiveness_extraction(
 
         print(f"\n  EXTRACT {pdf_path.name}")
         try:
-            records = extract_with_llm(str(pdf_path), pdf_path.name, runtime) \
+            records = extract_with_llm(str(pdf_path), pdf_path.name, runtime, max_pages=max_pages) \
                       if use_llm else \
-                      extract_with_tables(str(pdf_path), pdf_path.name)
+                      extract_with_tables(str(pdf_path), pdf_path.name, max_pages=max_pages)
         except Exception as exc:
             logger.error("[Effectiveness] Failed %s: %s", pdf_path.name, exc)
             print(f"  ERROR   {pdf_path.name}: {exc}")

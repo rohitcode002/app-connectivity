@@ -560,8 +560,13 @@ def extract_page_data(page, page_number: int) -> Optional[dict]:
 # Single-PDF extraction
 # ---------------------------------------------------------------------------
 
-def extract_bayallocation_pdf(pdf_path: str) -> list[dict]:
+def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1) -> list[dict]:
     """Extract all pages from one Bay Allocation PDF.
+
+    Parameters
+    ----------
+    max_pages : int
+        Maximum number of pages to scan per PDF. -1 means all pages.
 
     Each page is treated as one independent extraction unit.
 
@@ -576,9 +581,12 @@ def extract_bayallocation_pdf(pdf_path: str) -> list[dict]:
 
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
-        print(f"  [BayAllocation] {total} pages -- scanning ...")
+        limit = total if max_pages == -1 else min(max_pages, total)
+        label = "all" if max_pages == -1 else f"first {limit} of"
+        print(f"  [BayAllocation] {total} pages ({label}) -- scanning ...")
 
-        for i, page in enumerate(pdf.pages):
+        for i in range(limit):
+            page = pdf.pages[i]
             page_number = i + 1
             text = page.extract_text() or ""
 

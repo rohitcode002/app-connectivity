@@ -19,6 +19,8 @@ def _build_args() -> argparse.Namespace:
                         help="OpenAI API key (laptop mode override)")
     parser.add_argument("--llm-script", default=None,
                         help="Path to llm_client.bat (vm mode override)")
+    parser.add_argument("--max-pages", type=int, default=None,
+                        help="Max pages to process per PDF (-1 = all, default from config)")
     parser.add_argument("--sources", default=None, metavar="LIST",
                         help="Comma-separated source keys/names to extract (default: all)")
     return parser.parse_args()
@@ -30,11 +32,14 @@ def main() -> None:
         mode_override=args.mode,
         api_key_override=args.api_key,
         llm_script_override=args.llm_script,
+        max_pages_override=args.max_pages,
     )
 
     only_sources = None
     if args.sources:
         only_sources = [part.strip() for part in args.sources.split(",") if part.strip()]
+
+    print(f"\n  Max pages per PDF : {runtime.max_pages if runtime.max_pages != -1 else 'ALL'}")
 
     results = run_pending_extractions(
         runtime,
@@ -50,3 +55,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

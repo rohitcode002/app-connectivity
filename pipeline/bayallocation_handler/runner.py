@@ -108,6 +108,7 @@ def run_bayallocation_extraction(
     output_dir: Path | str | None = None,
     excel_path: Path | str | None = None,
     runtime:    Optional[RuntimeConfig] = None,
+    max_pages:  int = -1,
 ) -> pd.DataFrame:
     """Discover Bay Allocation PDFs → extract (skip cached) → dump JSON → write Excel.
 
@@ -156,6 +157,7 @@ def run_bayallocation_extraction(
     print(f"  Cached      : {cached_count}  (will be skipped)")
     print(f"  To extract  : {len(pdf_files) - cached_count}")
     print(f"  Mode        : {runtime.execution_target}")
+    print(f"  Max pages   : {max_pages if max_pages != -1 else 'ALL'}")
     print("=" * 64)
 
     all_results: list[dict] = []
@@ -172,7 +174,7 @@ def run_bayallocation_extraction(
         print("-" * 48)
 
         try:
-            pages = extract_bayallocation_pdf(str(pdf_path))
+            pages = extract_bayallocation_pdf(str(pdf_path), max_pages=max_pages)
         except Exception as exc:
             logger.error("[BayAllocation] Failed %s: %s", pdf_path.name, exc)
             print(f"  ERROR   {pdf_path.name}: {exc}")

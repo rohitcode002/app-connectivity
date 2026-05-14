@@ -57,8 +57,16 @@ def _load_json(path: Path) -> dict:
         return json.load(fh)
 
 
+# Increment this version when postprocessing logic changes materially.
+# Stale caches without a matching version will be re-extracted.
+_POSTPROCESS_VERSION = 2
+
+
 def _has_current_jcc_schema(data: dict) -> bool:
-    """Return True when cached JCC rows already contain the new derived fields."""
+    """Return True when cached JCC rows already contain the new derived fields
+    AND were produced with the current postprocessing version."""
+    if data.get("postprocess_version", 0) < _POSTPROCESS_VERSION:
+        return False
     required = {"total_COD", "COD_Found", "effective_date", "TGNA", "GNA"}
     saw_row = False
     for page in data.get("pages", []):
@@ -90,6 +98,7 @@ def run_jcc_extraction(
     output_dir:  Path | str | None = None,
     excel_path:  Path | str | None = None,
     runtime:     Optional[RuntimeConfig] = None,
+    max_pages:   int = -1,
     *,
     effectiveness_df: pd.DataFrame | None = None,
     effectiveness_excel_path: Path | str | None = None,
@@ -162,6 +171,7 @@ def run_jcc_extraction(
     print(f"  Cached      : {cached_count}  (will be skipped)")
     print(f"  To extract  : {len(pdf_files) - cached_count}")
     print(f"  Mode        : {runtime.execution_target}")
+    print(f"  Max pages   : {max_pages if max_pages != -1 else 'ALL'}")
     print("=" * 64)
 
     all_results: list[dict] = []
@@ -182,7 +192,7 @@ def run_jcc_extraction(
         print("-" * 48)
 
         try:
-            pages = extract_jcc_pdf(str(pdf_path), runtime=runtime)
+            pages = extract_jcc_pdf(str(pdf_path), runtime=runtime, max_pages=max_pages)
         except Exception as exc:
             logger.error("[JCC] Failed %s: %s", pdf_path.name, exc)
             print(f"  ERROR   {pdf_path.name}: {exc}")
@@ -192,6 +202,7 @@ def run_jcc_extraction(
             "source": pdf_path.name,
             "total_matching_pages": len(pages),
             "pages": pages,
+            "postprocess_version": _POSTPROCESS_VERSION,
         }
 
         _save_json(result, cache)

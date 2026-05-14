@@ -1,7 +1,7 @@
 """
 cmets_handler/extraction.py — PDF reading & LLM extraction sub-layers
 =======================================================================
-Sub-layer A: pdfplumber page text extraction
+Sub-layer A: PDF page text extraction (pdfplumber for text, camelot for tables)
 Sub-layer B: regex column-header gate (delegates to gate.py)
 Sub-layer C: LLM row extraction (sends page text → GPT → parsed rows)
 
@@ -15,9 +15,10 @@ import json
 import re
 from typing import Optional
 
+import camelot
 import pdfplumber
 
-from config import MAX_PAGES, MODEL
+from config import MODEL
 from llm_client import call_llm, extract_text_from_response
 from pipeline.cmets_handler.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 from pipeline.cmets_handler.gate import page_passes_gate
@@ -30,18 +31,60 @@ from pipeline.cmets_handler.voltage_extractor import (
 from pipeline.shared_utils import parse_json
 
 
+# ── Helper: build enriched page text with camelot tables ──────────────────────
+
+def _clean_multiline(text) -> str:
+    if text is None:
+        return ""
+    return "\n".join(" ".join(line.split()) for line in str(text).splitlines() if line.strip())
+
+
+def _camelot_table_text(pdf_path: str, page_number: int) -> str:
+    """Extract table text from a page using camelot for LLM context."""
+    try:
+        tables = camelot.read_pdf(
+            pdf_path, pages=str(page_number), flavor='lattice',
+            suppress_stdout=True,
+        )
+        if not tables or not tables.n:
+            tables = camelot.read_pdf(
+                pdf_path, pages=str(page_number), flavor='stream',
+                suppress_stdout=True,
+            )
+    except Exception:
+        return ""
+
+    if not tables:
+        return ""
+
+    rendered: list[str] = []
+    for table_idx, table in enumerate(tables, 1):
+        rows = []
+        for _, row in table.df.iterrows():
+            rows.append(" | ".join(_clean_multiline(str(v)) for v in row.values))
+        if rows:
+            rendered.append(f"Table {table_idx}:\n" + "\n".join(rows))
+    return "\n\n".join(rendered)
+
+
 # ── Sub-layer A: PDF page extraction ──────────────────────────────────────────
 
-def extract_pages(pdf_path: str) -> list[dict]:
-    """Read page text from *pdf_path* using pdfplumber.
+def extract_pages(pdf_path: str, max_pages: int = -1) -> list[dict]:
+    """Read page text from *pdf_path* using pdfplumber for text + camelot for tables.
 
-    Returns a list of ``{"page_number": int, "text": str}`` dicts.
+    Parameters
+    ----------
+    max_pages : int
+        Maximum number of pages to process per PDF.
+        -1 means process all pages.
+
+    Returns a list of ``{"page_number": int, "text": str, "table_text": str}`` dicts.
     """
     pages = []
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
-        limit = total if MAX_PAGES == -1 else min(MAX_PAGES, total)
-        label = "all" if MAX_PAGES == -1 else f"first {limit}"
+        limit = total if max_pages == -1 else min(max_pages, total)
+        label = "all" if max_pages == -1 else f"first {limit}"
         print(f"  [A] {total} pages total — processing {label}")
         for i in range(limit):
             text = pdf.pages[i].extract_text() or ""
@@ -50,7 +93,6 @@ def extract_pages(pdf_path: str) -> list[dict]:
 
 
 # ── Sub-layer C: LLM row extraction ──────────────────────────────────────────
-
 
 
 
@@ -91,9 +133,10 @@ def run_single_pdf(
     api_key: Optional[str],
     vm_mode: bool = False,
     llm_script_path: Optional[str] = None,
+    max_pages: int = -1,
 ) -> PipelineResult:
     """Run sub-layers A→B→C for a single PDF and return PipelineResult."""
-    pages         = extract_pages(pdf_path)
+    pages         = extract_pages(pdf_path, max_pages=max_pages)
     results       = []
     pages_passed  = 0
     pages_skipped = 0
@@ -112,9 +155,15 @@ def run_single_pdf(
         print(f"  [B] Page {pnum:>3}: PASS ✓  fields={active_fields}")
         pages_passed += 1
 
+        # Enrich page text with camelot table view for better LLM context
+        table_text = _camelot_table_text(pdf_path, pnum)
+        enriched_text = text
+        if table_text:
+            enriched_text = f"{text}\n\nTABLE CELL VIEW:\n{table_text}"
+
         # Sub-layer C: LLM extraction
-        print(f"  [C] Page {pnum} ({len(text)} chars) → LLM …", end="", flush=True)
-        raw_rows   = llm_extract_rows(text, active_fields, vm_mode, api_key, llm_script_path)
+        print(f"  [C] Page {pnum} ({len(enriched_text)} chars) → LLM …", end="", flush=True)
+        raw_rows   = llm_extract_rows(enriched_text, active_fields, vm_mode, api_key, llm_script_path)
         print(f" {len(raw_rows)} raw")
 
         raw_rows   = dedup_dicts(raw_rows)

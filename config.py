@@ -54,6 +54,7 @@ class RuntimeConfig:
     proxy_insecure_ssl: bool
     source_names: tuple[str, ...]
     source_regions: tuple[str, ...]
+    max_pages: int  # -1 = all pages, N = first N pages per PDF
 
 
 def _split_config_list(value) -> tuple[str, ...]:
@@ -74,6 +75,7 @@ def load_runtime_config(
     llm_script_override: Optional[str] = None,
     download_limit_override: Optional[int] = None,
     download_all_override: Optional[bool] = None,
+    max_pages_override: Optional[int] = None,
     require_api_key: bool = True,
 ) -> RuntimeConfig:
     """
@@ -156,6 +158,13 @@ def load_runtime_config(
             "Set EXECUTION_TARGET=vm (or VM=true) to use VM script mode."
         )
 
+    # Max pages per PDF
+    if max_pages_override is not None:
+        mp = max_pages_override
+    else:
+        env_mp = os.getenv("MAX_PAGES", "").strip()
+        mp = int(env_mp) if env_mp else MAX_PAGES
+
     return RuntimeConfig(
         execution_target="vm" if vm_mode else "laptop",
         vm_mode=vm_mode,
@@ -168,4 +177,5 @@ def load_runtime_config(
         proxy_insecure_ssl=proxy_insecure_ssl,
         source_names=source_names,
         source_regions=source_regions,
+        max_pages=mp,
     )

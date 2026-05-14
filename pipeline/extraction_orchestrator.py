@@ -178,6 +178,7 @@ def _cache_path_for(output_dir: Path, pdf_name: str) -> Path:
 
 def _run_source_runner(source: ExtractionSource, runtime: RuntimeConfig, pdfs: list[PendingPdf]) -> None:
     tmp_ctx, temp_dir = _prepare_temp_dir(pdfs, source.flatten)
+    max_pages = runtime.max_pages
     try:
         if source.runner is run_cmets_extraction:
             source.runner(
@@ -185,6 +186,7 @@ def _run_source_runner(source: ExtractionSource, runtime: RuntimeConfig, pdfs: l
                 output_dir=str(source.output_dir),
                 excel_path=str(source.excel_path),
                 runtime=runtime,
+                max_pages=max_pages,
             )
         elif source.runner is run_jcc_extraction:
             excel_root = source.excel_path.parent
@@ -193,6 +195,7 @@ def _run_source_runner(source: ExtractionSource, runtime: RuntimeConfig, pdfs: l
                 output_dir=str(source.output_dir),
                 excel_path=str(source.excel_path),
                 runtime=runtime,
+                max_pages=max_pages,
                 jcc_output_excel_path=str(excel_root / "04_jcc_output_layer.xlsx"),
                 jcc_mapped_excel_path=str(excel_root / "04_jcc_extracted_mapped.xlsx"),
                 layer4_excel_path=str(excel_root / "04_cmets_jcc_mapped.xlsx"),
@@ -204,6 +207,7 @@ def _run_source_runner(source: ExtractionSource, runtime: RuntimeConfig, pdfs: l
                 output_dir=str(source.output_dir),
                 excel_path=str(source.excel_path),
                 runtime=runtime,
+                max_pages=max_pages,
             )
     finally:
         tmp_ctx.cleanup()

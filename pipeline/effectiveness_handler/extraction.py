@@ -3,7 +3,7 @@ effectiveness_handler/extraction.py — PDF extraction sub-layers
 =================================================================
 Contains two extraction strategies:
   1. LLM-based extraction (primary) — chunked text → GPT → parsed rows
-  2. pdfplumber table extraction (fallback) — when no API key is set
+  2. camelot table extraction (fallback) — when no API key is set
 
 Edit this file to change how data is extracted from effectiveness PDFs.
 """
@@ -15,6 +15,7 @@ import re
 import time
 from typing import Optional
 
+import camelot
 import pdfplumber
 
 from config import MODEL
@@ -28,11 +29,13 @@ from pipeline.shared_utils import parse_json
 
 # ── Strategy 1: LLM extraction ───────────────────────────────────────────────
 
-def extract_with_llm(pdf_path: str, source_name: str, runtime) -> list[RERecord]:
+def extract_with_llm(pdf_path: str, source_name: str, runtime, max_pages: int = -1) -> list[RERecord]:
     """Extract all records from one effectiveness PDF via LLM (with retry)."""
     pages_text: list[str] = []
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
+        total = len(pdf.pages)
+        limit = total if max_pages == -1 else min(max_pages, total)
+        for page in pdf.pages[:limit]:
             t = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
             if t.strip():
                 pages_text.append(t)
@@ -83,7 +86,7 @@ def extract_with_llm(pdf_path: str, source_name: str, runtime) -> list[RERecord]
     return records
 
 
-# ── Strategy 2: pdfplumber table fallback ─────────────────────────────────────
+# ── Strategy 2: camelot table fallback ────────────────────────────────────────
 
 _HEADER_MAP: dict[str, str] = {
     "si no": "sl_no", "sl. no.": "sl_no", "sl no": "sl_no",
@@ -123,35 +126,55 @@ def _is_header_row(row: list) -> bool:
     return "application" in text or "sl. no" in text or "si no" in text
 
 
-def extract_with_tables(pdf_path: str, source_name: str) -> list[RERecord]:
-    """pdfplumber table-detection fallback (when no API key is set)."""
+def extract_with_tables(pdf_path: str, source_name: str, max_pages: int = -1) -> list[RERecord]:
+    """Camelot table-detection fallback (when no API key is set)."""
     records: list[RERecord] = []
     mapping: dict = {}
+
+    # Determine page range
     with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables({
-                "vertical_strategy": "lines", "horizontal_strategy": "lines",
-                "snap_tolerance": 3, "join_tolerance": 3,
-            }) or []
-            if not tables:
-                tbl = page.extract_table()
-                tables = [tbl] if tbl else []
-            for table in tables:
-                if not table:
-                    continue
-                for row in table:
-                    if not row or all(c is None for c in row):
-                        continue
-                    if _is_header_row(row):
-                        mapping = _map_headers(row)
-                        continue
-                    if not mapping:
-                        continue
-                    raw = {field: row[ci] for ci, field in mapping.items() if ci < len(row)}
-                    if not raw.get("application_id") and not raw.get("name_of_applicant"):
-                        continue
-                    raw["source_file"] = source_name
-                    rec = safe_record(raw)
-                    if rec:
-                        records.append(rec)
+        total = len(pdf.pages)
+    limit = total if max_pages == -1 else min(max_pages, total)
+    page_str = f"1-{limit}" if limit > 1 else "1"
+
+    # Extract tables with camelot (lattice first, then stream fallback)
+    all_tables = []
+    try:
+        tables = camelot.read_pdf(
+            pdf_path, pages=page_str, flavor='lattice',
+            suppress_stdout=True,
+        )
+        if tables and tables.n:
+            all_tables = list(tables)
+    except Exception:
+        pass
+
+    if not all_tables:
+        try:
+            tables = camelot.read_pdf(
+                pdf_path, pages=page_str, flavor='stream',
+                suppress_stdout=True,
+            )
+            if tables and tables.n:
+                all_tables = list(tables)
+        except Exception:
+            pass
+
+    for table in all_tables:
+        for _, df_row in table.df.iterrows():
+            row = [str(v) if v else None for v in df_row.values]
+            if not row or all(c is None for c in row):
+                continue
+            if _is_header_row(row):
+                mapping = _map_headers(row)
+                continue
+            if not mapping:
+                continue
+            raw = {field: row[ci] for ci, field in mapping.items() if ci < len(row)}
+            if not raw.get("application_id") and not raw.get("name_of_applicant"):
+                continue
+            raw["source_file"] = source_name
+            rec = safe_record(raw)
+            if rec:
+                records.append(rec)
     return records

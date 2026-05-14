@@ -3,7 +3,7 @@ jcc_handler/extraction.py — PDF table extraction logic
 ========================================================
 Uses a column-name gate to find connectivity/pooling station pages in
 JCC Meeting PDFs, then extracts the target rows with an LLM primary path
-and a pdfplumber table fallback.
+and a camelot table fallback.
 
 Edit this file to change how tables are detected, headers are matched,
 or data rows are parsed.
@@ -16,6 +16,7 @@ import time
 from datetime import date, datetime
 from typing import Optional
 
+import camelot
 import pdfplumber
 
 from config import MODEL
@@ -153,13 +154,50 @@ def page_passes_gate(text: str) -> bool:
     return has_core_columns or hits >= 4 or (legacy_hits == len(REQUIRED_KEYWORDS) and "schedule" in norm)
 
 
-def _page_table_text(page) -> str:
-    tables = page.extract_tables() or []
+def _camelot_tables(pdf_path: str, page_number: int) -> list:
+    """Extract tables from a single page using camelot (lattice → stream fallback)."""
+    try:
+        tables = camelot.read_pdf(
+            pdf_path, pages=str(page_number), flavor='lattice',
+            suppress_stdout=True,
+        )
+        if tables and tables.n:
+            return tables
+    except Exception:
+        pass
+
+    try:
+        tables = camelot.read_pdf(
+            pdf_path, pages=str(page_number), flavor='stream',
+            suppress_stdout=True,
+        )
+        if tables and tables.n:
+            return tables
+    except Exception:
+        pass
+
+    return []
+
+
+def _camelot_table_to_list(table) -> list[list[str]]:
+    """Convert a camelot table DataFrame to list of lists (same format as pdfplumber)."""
+    rows: list[list[str]] = []
+    for _, row in table.df.iterrows():
+        rows.append([str(v) if v else "" for v in row.values])
+    return rows
+
+
+def _page_table_text(pdf_path: str, page_number: int) -> str:
+    """Build a table-cell text view of the page for LLM context using camelot."""
+    tables = _camelot_tables(pdf_path, page_number)
+    if not tables:
+        return ""
+
     rendered: list[str] = []
     for table_idx, table in enumerate(tables, 1):
         rows = []
-        for row in table or []:
-            rows.append(" | ".join(_clean_multiline(cell) for cell in (row or [])))
+        for _, row in table.df.iterrows():
+            rows.append(" | ".join(_clean_multiline(str(v)) for v in row.values))
         if rows:
             rendered.append(f"Table {table_idx}:\n" + "\n".join(rows))
     return "\n\n".join(rendered)
@@ -250,15 +288,10 @@ def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, run
     return []
 
 
+# COD patterns and effective date extraction are now in jcc_postprocess.py
+# These legacy definitions are kept for backward compatibility with
+# jcc_output_layer.py's _extract_cod_mw helper.
 _DATE_PATTERN = r"\d{1,2}[./-]\d{1,2}[./-]\d{2,4}"
-_COD_LINE_PATTERN = re.compile(
-    rf"([\d,]+(?:\.\d+)?)\s*MW[^\n\r]{{0,120}}?({_DATE_PATTERN})[^\n\r]{{0,80}}?\((?:CoD|COD|Commissioned)\)",
-    re.IGNORECASE,
-)
-_EFFECTIVE_DATE_PATTERN = re.compile(
-    rf"\beffective\b(?:\s*w\.?e\.?f\.?)?[^0-9]{{0,80}}(?P<date>{_DATE_PATTERN})",
-    re.IGNORECASE,
-)
 _APP_ID_PATTERN = re.compile(r"\b(?:\d[\s\-/.]*){8,14}\b")
 
 
@@ -293,16 +326,12 @@ def _generation_block(text: str) -> str:
 
 
 def _calculate_total_cod(text: str) -> tuple[float | None, bool]:
-    """Sum MW rows in the Generation block that have date + COD/Commissioned."""
-    values: list[float] = []
-    for mw, _dt in _COD_LINE_PATTERN.findall(_generation_block(text)):
-        try:
-            values.append(float(mw.replace(",", "")))
-        except ValueError:
-            continue
-    if not values:
-        return None, False
-    return round(sum(values), 2), True
+    """Sum MW rows in the Generation block that have date + COD/Commissioned.
+
+    Uses the robust multi-pattern approach from jcc_postprocess.
+    """
+    from pipeline.jcc_handler.jcc_postprocess import calculate_total_cod
+    return calculate_total_cod(text, runtime=None)
 
 
 def _parse_date(value: str) -> date | None:
@@ -318,12 +347,9 @@ def _parse_date(value: str) -> date | None:
 
 
 def _extract_effective_date(text: str) -> str:
-    if not text:
-        return ""
-    match = _EFFECTIVE_DATE_PATTERN.search(text)
-    if match:
-        return match.group("date")
-    return ""
+    """Extract the connectivity effective date using the improved logic."""
+    from pipeline.jcc_handler.jcc_postprocess import extract_effective_date
+    return extract_effective_date(text)
 
 
 def _add_computed_fields(row: dict) -> dict:
@@ -354,15 +380,19 @@ def _add_computed_fields(row: dict) -> dict:
     return output
 
 
-def extract_page_data(page, page_number: int) -> Optional[dict]:
-    """Extract the connectivity table from a single pdfplumber Page.
+def extract_page_data(pdf_path: str, page_number: int, page_text: str = "") -> Optional[dict]:
+    """Extract the connectivity table from a single page using camelot.
 
     Returns a dict with page metadata and a list of row dicts,
     or None if no target table is found.
     """
-    tables = page.extract_tables()
+    tables = _camelot_tables(pdf_path, page_number)
+    if not tables:
+        return None
+
     target = None
-    for tbl in tables:
+    for table in tables:
+        tbl = _camelot_table_to_list(table)
         if _is_target_table(tbl):
             target = tbl
             break
@@ -382,24 +412,40 @@ def extract_page_data(page, page_number: int) -> Optional[dict]:
 
     return {
         "page_number": page_number,
-        "raw_text":    page.extract_text() or "",
+        "raw_text":    page_text,
         "rows":        rows,
     }
 
 
 # ── Single-PDF extraction ────────────────────────────────────────────────────
 
-def extract_jcc_pdf(pdf_path: str, runtime=None) -> list[dict]:
+def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[dict]:
     """Extract all matching pages from one JCC PDF.
 
+    Parameters
+    ----------
+    max_pages : int
+        Maximum number of pages to scan per PDF. -1 means all pages.
+
     Returns a list of page result dicts (same shape as extract_page_data).
+    After extraction, runs postprocessing to:
+      1. Merge continuation rows (page-spanning rows with empty pooling_station)
+      2. Recompute all derived fields with improved COD + effective_date logic
     """
+    from pipeline.jcc_handler.jcc_postprocess import postprocess_all_pages
+
     all_pages: list[dict] = []
+
+    # Use pdfplumber for text extraction and page iteration;
+    # camelot is used for table extraction on pages that pass the gate.
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
-        print(f"  [JCC] {total} pages — scanning for target tables …")
+        limit = total if max_pages == -1 else min(max_pages, total)
+        label = "all" if max_pages == -1 else f"first {limit} of"
+        print(f"  [JCC] {total} pages ({label}) — scanning for target tables …")
 
-        for i, page in enumerate(pdf.pages):
+        for i in range(limit):
+            page = pdf.pages[i]
             page_number = i + 1
             text = page.extract_text() or ""
 
@@ -407,7 +453,8 @@ def extract_jcc_pdf(pdf_path: str, runtime=None) -> list[dict]:
                 continue
 
             result = None
-            table_text = _page_table_text(page)
+            # Use camelot for table cell view (LLM context)
+            table_text = _page_table_text(pdf_path, page_number)
             print(f"  [JCC] Page {page_number:3d} target columns found → LLM …", end="", flush=True)
             llm_rows = llm_extract_page_rows(text, table_text, page_number, runtime)
             if llm_rows:
@@ -419,10 +466,10 @@ def extract_jcc_pdf(pdf_path: str, runtime=None) -> list[dict]:
                     "extraction_method": "llm",
                 }
             else:
-                print(" fallback table")
-                result = extract_page_data(page, page_number)
+                print(" fallback table (camelot)")
+                result = extract_page_data(pdf_path, page_number, page_text=text)
                 if result is not None:
-                    result["extraction_method"] = "pdfplumber_table"
+                    result["extraction_method"] = "camelot_table"
 
             if result is None:
                 continue
@@ -430,5 +477,9 @@ def extract_jcc_pdf(pdf_path: str, runtime=None) -> list[dict]:
             row_count = len(result["rows"])
             print(f"  ✓ Page {page_number:3d} → {row_count} data rows")
             all_pages.append(result)
+
+    # ── Postprocessing: merge continuations + recompute COD/effective_date ──
+    if all_pages:
+        postprocess_all_pages(all_pages, runtime=runtime)
 
     return all_pages
