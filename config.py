@@ -34,7 +34,7 @@ SOURCE_NAMES = ["cmets", "jcc", "effectiveness", "bayallocation"]
 SOURCE_REGIONS = ["Northern Region"]
 
 # Proxy settings for VM downloader
-PROXY_ENABLED = True
+PROXY_ENABLED = False
 PROXY_URL = "http://cloudproxy.adani.com:8080"
 PROXY_INSECURE_SSL = True
 

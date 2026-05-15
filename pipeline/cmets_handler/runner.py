@@ -29,7 +29,45 @@ logger = logging.getLogger(__name__)
 
 # ─── Default I/O paths ────────────────────────────────────────────────────────
 _START_DIR  = Path(__file__).resolve().parent.parent.parent   # …/start/
-SOURCE_DIR  : Path = _START_DIR / "source" / "cmets_pdfs"
+
+# Root of the downloaded CMETS output
+_CMETS_DOWNLOAD_ROOT : Path = _START_DIR / "output" / "source_output" / "CTUIL-ISTS-CMETS"
+# Two download layouts for minutes PDFs:
+#   Layout 1: CTUIL-ISTS-CMETS/minutes/<Region>/*.pdf   (lowercase "minutes")
+#   Layout 2: CTUIL-ISTS-CMETS/<Region>/Minutes/*.pdf   (uppercase "Minutes")
+_DOWNLOAD_MINUTES_LC : Path = _CMETS_DOWNLOAD_ROOT / "minutes"
+# Fallback: legacy manual-drop folder
+_LEGACY_SOURCE       : Path = _START_DIR / "source" / "cmets_pdfs"
+
+
+def _collect_minutes_pdfs(root: Path) -> list[Path]:
+    """Collect CMETS minutes PDFs from both download layouts under *root*.
+
+    Layout 1: root/minutes/<Region>/*.pdf
+    Layout 2: root/<Region>/Minutes/*.pdf
+    """
+    pdfs: set[Path] = set()
+    # Layout 1: minutes/ (lowercase) with region subfolders
+    lc_dir = root / "minutes"
+    if lc_dir.exists():
+        pdfs.update(p for p in lc_dir.rglob("*.pdf") if p.is_file())
+    # Layout 2: <Region>/Minutes/ (uppercase) at root level
+    for child in root.iterdir():
+        if child.is_dir() and child.name != "minutes" and child.name != "agenda":
+            minutes_sub = child / "Minutes"
+            if minutes_sub.is_dir():
+                pdfs.update(p for p in minutes_sub.rglob("*.pdf") if p.is_file())
+    return sorted(pdfs)
+
+
+def _default_source_dir() -> Path:
+    """Prefer downloaded PDFs; fall back to the legacy source folder."""
+    if _CMETS_DOWNLOAD_ROOT.exists() and _collect_minutes_pdfs(_CMETS_DOWNLOAD_ROOT):
+        return _CMETS_DOWNLOAD_ROOT
+    return _LEGACY_SOURCE
+
+
+SOURCE_DIR  : Path = _default_source_dir()
 OUTPUT_DIR  : Path = _START_DIR / "output" / "cmets_cache"
 CMETS_EXCEL : Path = _START_DIR / "excels" / "cmets.xlsx"
 
@@ -131,7 +169,12 @@ def run_cmets_extraction(
             raise FileNotFoundError(f"[CMETS] PDF not found: {p}")
         pdf_paths = [p]
     else:
-        pdf_paths = sorted(p for p in src.glob("*.pdf") if p.is_file())
+        # If src is the download root, collect from both minutes layouts;
+        # otherwise use recursive glob on the provided directory.
+        if src == _CMETS_DOWNLOAD_ROOT:
+            pdf_paths = _collect_minutes_pdfs(src)
+        else:
+            pdf_paths = sorted(p for p in src.rglob("*.pdf") if p.is_file())
         if not pdf_paths:
             raise SystemExit(f"[CMETS] No PDFs found in '{src}'.")
 

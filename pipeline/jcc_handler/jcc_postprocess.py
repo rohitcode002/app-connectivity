@@ -6,8 +6,7 @@ Three responsibilities:
 1. **COD Detection (robust)**
    First pass: multiple regex patterns that cover the different COD formats
    found across JCC PDFs. If regex finds nothing, a second pass uses the
-   LLM to extract COD/Commissioned MW values from the schedule text.
-
+   LLM to extract COD/Commissioned MW values from the schedule text
 2. **Row Continuation (page-spanning rows)**
    When a table row spans two PDF pages, the continuation row on the next
    page will have an empty ``pooling_station``. This module detects those

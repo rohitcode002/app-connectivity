@@ -28,7 +28,20 @@ logger = logging.getLogger(__name__)
 # ─── Default I/O paths ────────────────────────────────────────────────────────
 _START_DIR = Path(__file__).resolve().parent.parent.parent
 
-EFFECTIVE_SOURCE_DIR    : Path = _START_DIR / "source" / "effectiveness_pdfs"
+# Primary: where the downloader saves effectiveness PDFs
+_DOWNLOAD_SOURCE : Path = _START_DIR / "output" / "source_output" / "CTUIL-Regenerators-Effective-Date-wise"
+# Fallback: legacy manual-drop folder
+_LEGACY_SOURCE   : Path = _START_DIR / "source" / "effectiveness_pdfs"
+
+
+def _default_source_dir() -> Path:
+    """Prefer downloaded PDFs; fall back to the legacy source folder."""
+    if _DOWNLOAD_SOURCE.exists() and any(_DOWNLOAD_SOURCE.rglob("*.pdf")):
+        return _DOWNLOAD_SOURCE
+    return _LEGACY_SOURCE
+
+
+EFFECTIVE_SOURCE_DIR    : Path = _default_source_dir()
 EFFECTIVENESS_OUTPUT_DIR: Path = _START_DIR / "output" / "effectiveness_cache"
 EFFECTIVENESS_EXCEL     : Path = _START_DIR / "excels" / "effectiveness_combined.xlsx"
 
