@@ -20,7 +20,12 @@ from time import perf_counter
 from typing import Optional
 
 from config import RuntimeConfig, load_runtime_config
-from pipeline.excel_utils import export_to_excel
+from pipeline.excel_utils import (
+    _apply_data_style,
+    _apply_header_style,
+    _autosize_columns,
+    _get_openpyxl,
+)
 from pipeline.cmets_handler.models import PipelineResult, CMETS_COLUMNS
 from pipeline.cmets_handler.extraction import run_single_pdf
 from pipeline.cmets_handler.meeting_classifier import classify_meeting
@@ -138,36 +143,69 @@ def _agg_stats(all_serialized: list[dict]) -> dict:
     }
 
 
-def _meeting_meta_has_values(data: dict) -> bool:
-    meeting = data.get("meeting_meta") or {}
-    return any(meeting.get(col) for col in _MEETING_COLS)
+def _init_excel_workbook(xlsx: Path) -> Path:
+    """Create a fresh CMETS workbook with headers before per-PDF appends."""
+    opx = _get_openpyxl()
+    wb = opx.Workbook()
+    ws = wb.active
+    ws.title = "Extracted Data"
+    ws.append(CMETS_COLUMNS)
+    ws.freeze_panes = "A2"
+    _apply_header_style(ws, opx)
+    _autosize_columns(ws)
+
+    xlsx.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(xlsx)
+    return xlsx
 
 
-def _write_excel_snapshot(
-    all_data: list[dict],
+def _append_pdf_to_excel(
+    data: dict,
     xlsx: Path,
     started_at: datetime,
-    finished_at: datetime,
+    updated_at: datetime,
     runtime_s: float,
+    stats: dict,
 ) -> Path:
-    """Write the current accumulated CMETS rows to Excel."""
-    stats = _agg_stats(all_data)
-    return export_to_excel(
-        rows         = _flatten(all_data),
-        output_path  = xlsx,
-        sheet_name   = "Extracted Data",
-        column_order = CMETS_COLUMNS,
-        summary_rows = [
-            ("Run started at",           started_at.isoformat(timespec="seconds")),
-            ("Last updated at",          finished_at.isoformat(timespec="seconds")),
-            ("Runtime so far (seconds)", round(runtime_s, 2)),
-            ("PDFs processed",           stats["pdfs_processed"]),
-            ("Total pages extracted",    stats["total_pages_extracted"]),
-            ("Total pages passed gate",  stats["total_pages_passed_gate"]),
-            ("Total pages skipped",      stats["total_pages_skipped"]),
-            ("Total rows",               stats["total_rows"]),
-        ],
-    )
+    """Append one PDF's flattened JSON rows into the existing CMETS workbook."""
+    opx = _get_openpyxl()
+    if not xlsx.exists():
+        _init_excel_workbook(xlsx)
+
+    wb = opx.load_workbook(xlsx)
+    ws = wb["Extracted Data"] if "Extracted Data" in wb.sheetnames else wb.active
+    if ws.max_row == 0:
+        ws.append(CMETS_COLUMNS)
+        _apply_header_style(ws, opx)
+
+    for record in _flatten([data]):
+        ws.append([record.get(col) for col in CMETS_COLUMNS])
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    _apply_header_style(ws, opx)
+    _apply_data_style(ws, opx)
+    _autosize_columns(ws)
+
+    if "Run Summary" in wb.sheetnames:
+        del wb["Run Summary"]
+    ws_summary = wb.create_sheet("Run Summary")
+    for row in [
+        ("Run started at",           started_at.isoformat(timespec="seconds")),
+        ("Last updated at",          updated_at.isoformat(timespec="seconds")),
+        ("Runtime so far (seconds)", round(runtime_s, 2)),
+        ("Last appended PDF",        Path(data.get("pdf_path", "")).name),
+        ("PDFs processed",           stats["pdfs_processed"]),
+        ("Total pages extracted",    stats["total_pages_extracted"]),
+        ("Total pages passed gate",  stats["total_pages_passed_gate"]),
+        ("Total pages skipped",      stats["total_pages_skipped"]),
+        ("Total rows",               stats["total_rows"]),
+    ]:
+        ws_summary.append(list(row))
+    _autosize_columns(ws_summary)
+
+    wb.save(xlsx)
+    return xlsx
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -228,39 +266,14 @@ def run_cmets_extraction(
     started_at = datetime.now()
     t0         = perf_counter()
     all_data:  list[dict] = []
+    _init_excel_workbook(xlsx)
 
     for idx, pdf_path in enumerate(pdf_paths, 1):
         cache = out / f"{pdf_path.stem}.json"
 
-        if cache.exists():
-            print(f"\n[{idx}/{len(pdf_paths)}] SKIP    {pdf_path.name}")
-            data = _load_json(cache)
-            if not _meeting_meta_has_values(data):
-                print(f"  [M] Repairing cached meeting metadata …", end=" ", flush=True)
-                meeting_meta = classify_meeting(str(pdf_path))
-                print(
-                    f"#{meeting_meta.meeting_number or '?'} "
-                    f"({meeting_meta.meeting_date or 'no date'}) → "
-                    f"{meeting_meta.classification} "
-                    f"(GNA:{meeting_meta.gna_count} LTA:{meeting_meta.lta_count})"
-                )
-                data["meeting_meta"] = meeting_meta.as_row_dict()
-                _save_json(data, cache)
-            all_data.append(data)
-            out_path = _write_excel_snapshot(
-                all_data,
-                xlsx,
-                started_at,
-                datetime.now(),
-                perf_counter() - t0,
-            )
-            print(f"  → Excel updated: {out_path.name}")
-            continue
-
-        print(f"\n[{idx}/{len(pdf_paths)}] EXTRACT {pdf_path.name}")
-        print("-" * 64)
-
-        # ── Pre-extraction: classify meeting type (GNA / LTA) ─────────
+        # Meeting-level metadata is computed exactly once per PDF for this run.
+        # The same values are injected into every row flattened from this PDF.
+        print(f"\n[{idx}/{len(pdf_paths)}] METADATA {pdf_path.name}")
         print(f"  [M] Classifying meeting type …", end=" ", flush=True)
         meeting_meta = classify_meeting(str(pdf_path))
         print(
@@ -269,6 +282,26 @@ def run_cmets_extraction(
             f"{meeting_meta.classification} "
             f"(GNA:{meeting_meta.gna_count} LTA:{meeting_meta.lta_count})"
         )
+
+        if cache.exists():
+            print(f"  [X] SKIP extraction — cache found")
+            data = _load_json(cache)
+            data["meeting_meta"] = meeting_meta.as_row_dict()
+            _save_json(data, cache)
+            all_data.append(data)
+            out_path = _append_pdf_to_excel(
+                data,
+                xlsx,
+                started_at,
+                datetime.now(),
+                perf_counter() - t0,
+                _agg_stats(all_data),
+            )
+            print(f"  → Excel appended: {out_path.name}")
+            continue
+
+        print(f"  [X] EXTRACT {pdf_path.name}")
+        print("-" * 64)
 
         result = run_single_pdf(
             pdf_path=str(pdf_path),
@@ -281,14 +314,15 @@ def run_cmets_extraction(
         _save_json(data, cache)
         print(f"  → JSON: {cache.name}")
         all_data.append(data)
-        out_path = _write_excel_snapshot(
-            all_data,
+        out_path = _append_pdf_to_excel(
+            data,
             xlsx,
             started_at,
             datetime.now(),
             perf_counter() - t0,
+            _agg_stats(all_data),
         )
-        print(f"  → Excel updated: {out_path.name}")
+        print(f"  → Excel appended: {out_path.name}")
 
     runtime_s   = perf_counter() - t0
     finished_at = datetime.now()
@@ -303,12 +337,6 @@ def run_cmets_extraction(
     print(f"    Runtime (s)   : {runtime_s:.1f}")
     print("=" * 64)
 
-    out_path = _write_excel_snapshot(
-        all_data,
-        xlsx,
-        started_at,
-        finished_at,
-        runtime_s,
-    )
+    out_path = xlsx.resolve()
     print(f"\n[CMETS] cmets.xlsx → {out_path}")
     return out_path

@@ -3,19 +3,19 @@ cmets_handler/meeting_classifier.py — CMETS Meeting Number & Date Extraction
 ===============================================================================
 Reads the FIRST PAGE of each CMETS PDF and extracts:
 
-    1. Meeting number  — e.g. "42" from "42nd Consulting Meeting"
+    1. Meeting number  — e.g. "42nd" from "42nd Consulting Meeting"
                          or from "Ref: CTU/N/00/CMETS_NR/42"
     2. Meeting date    — e.g. "11th November 2025 (Tuesday)"
                          parsed as dd.mm.yyyy
 
-Then determines which columns the values go into based on GNA vs LTA
-keyword dominance across the ENTIRE PDF:
+Then determines which columns the values go into based on the GNA vs LTA
+keyword count across the ENTIRE PDF:
 
-    • If GNA keywords exist in comparable ratio to LTA (or GNA dominant):
+    • If GNA keywords are more frequent than or tied with LTA keywords:
         → CMETS GNA Approved  = meeting number
         → CMETS GNA Meeting Date = meeting date
 
-    • If LTA keywords are clearly dominant:
+    • If LTA keywords are more frequent:
         → CMETS LTA Approved  = meeting number
         → CMETS LTA Meeting Date = meeting date
 
@@ -35,6 +35,9 @@ from __future__ import annotations
 
 import re
 import logging
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -95,11 +98,11 @@ def _extract_meeting_number(text: str) -> Optional[str]:
     """
     # Pattern 1: "NNth/st/nd/rd Consulting Meeting" or "NNth/st/nd/rd CMETS"
     m = re.search(
-        r"(\d{1,3})\s*(?:st|nd|rd|th)\s+(?:consulting\s+meeting|cmets)",
+        r"(\d{1,3})\s*(st|nd|rd|th)\s+(?:consulting\s+meeting|cmets)",
         text, re.IGNORECASE,
     )
     if m:
-        return m.group(1)
+        return f"{m.group(1)}{m.group(2).lower()}"
 
     # Pattern 2: Ref number like "CMETS_NR/42" or "CMETS_SR/35" or "CMETS/42"
     m = re.search(
@@ -121,8 +124,11 @@ def _extract_meeting_number(text: str) -> Optional[str]:
 
 
 def _extract_meeting_number_from_filename(pdf_path: str) -> Optional[str]:
-    """Fallback meeting number from filenames like '45th CMETS-NR.pdf'."""
+    """Extract meeting number from filenames like '45th CMETS-NR.pdf'."""
     stem = Path(pdf_path).stem
+    m = re.search(r"\b(\d{1,3})\s*(st|nd|rd|th)\b", stem, re.IGNORECASE)
+    if m:
+        return f"{m.group(1)}{m.group(2).lower()}"
     return _extract_meeting_number(stem)
 
 
@@ -183,6 +189,44 @@ def _extract_meeting_date(text: str) -> Optional[str]:
     return None
 
 
+def _ocr_first_page_text(pdf_path: str) -> str:
+    """OCR page 1 when it is image-only, if local OCR tools are available."""
+    if not shutil.which("pdftoppm") or not shutil.which("tesseract"):
+        return ""
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prefix = Path(tmpdir) / "cmets_page"
+            subprocess.run(
+                [
+                    "pdftoppm",
+                    "-f", "1",
+                    "-l", "1",
+                    "-png",
+                    "-r", "200",
+                    pdf_path,
+                    str(prefix),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            images = sorted(Path(tmpdir).glob("cmets_page-*.png"))
+            if not images:
+                return ""
+
+            result = subprocess.run(
+                ["tesseract", str(images[0]), "stdout", "--psm", "6"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout or ""
+    except Exception as exc:
+        logger.debug("[MeetingClassifier] OCR fallback failed for %s: %s", pdf_path, exc)
+        return ""
+
+
 # ── GNA vs LTA keyword ratio ────────────────────────────────────────────────
 
 # Patterns used to count GNA vs LTA presence.
@@ -214,26 +258,8 @@ def _count_keywords(full_text: str) -> tuple[int, int]:
 
 
 def _classify(gna_count: int, lta_count: int) -> str:
-    """Determine if this PDF is GNA-dominant or LTA-dominant.
-
-    Logic:
-      • If both GNA and LTA exist in comparable ratio (GNA >= LTA * 0.3)
-        → classify as "GNA"  (GNA is default / dominant)
-      • If LTA is clearly dominant (GNA < LTA * 0.3)
-        → classify as "LTA"
-      • If neither keyword exists → default "GNA"
-    """
-    if lta_count == 0 and gna_count == 0:
-        return "GNA"  # default
-    if lta_count == 0:
-        return "GNA"
-    if gna_count == 0:
-        return "LTA"
-
-    # If GNA count is at least 30% of LTA count → GNA (comparable or dominant)
-    if gna_count >= lta_count * 0.3:
-        return "GNA"
-    return "LTA"
+    """Classify by whichever keyword count is higher; ties default to GNA."""
+    return "LTA" if lta_count > gna_count else "GNA"
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
@@ -244,7 +270,7 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
     Steps:
       1. Read the first readable meeting page → extract meeting number + date
       2. Read ALL pages → count GNA vs LTA keywords
-      3. Classify as "GNA" or "LTA" based on keyword ratio
+      3. Classify as "GNA" or "LTA" based on whichever count is higher
       4. Place meeting number + date into the appropriate columns
 
     Parameters
@@ -265,12 +291,18 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                 logger.warning("[MeetingClassifier] PDF has no pages: %s", pdf_path)
                 return meta
 
-            # ── Step 1: First readable meeting page — number + date ────────
+            # ── Step 1: First page / first readable meeting page ───────────
             #
-            # Several downloaded CMETS minutes PDFs contain blank/cover pages
-            # before the actual first page. The meeting date still comes only
-            # from that first readable meeting page, not from arbitrary later
-            # agenda/table pages.
+            # Meeting number comes from the filename first. Meeting date is
+            # attempted from page 1 text, then page 1 OCR if it is image-only.
+            # If OCR tools are unavailable, fall back to the first readable
+            # meeting page text so image cover pages do not blank every row.
+            first_physical_page_text = pdf.pages[0].extract_text(
+                x_tolerance=3, y_tolerance=3,
+            ) or ""
+            if not first_physical_page_text.strip():
+                first_physical_page_text = _ocr_first_page_text(pdf_path)
+
             first_page_text = ""
             for page in pdf.pages:
                 candidate = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
@@ -278,10 +310,13 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                     first_page_text = candidate
                     break
 
-            meta.meeting_number = _extract_meeting_number(first_page_text)
+            meta.meeting_number = _extract_meeting_number_from_filename(pdf_path)
             if not meta.meeting_number:
-                meta.meeting_number = _extract_meeting_number_from_filename(pdf_path)
-            meta.meeting_date = _extract_meeting_date(first_page_text)
+                meta.meeting_number = _extract_meeting_number(first_page_text)
+            meta.meeting_date = (
+                _extract_meeting_date(first_physical_page_text)
+                or _extract_meeting_date(first_page_text)
+            )
 
             if not meta.meeting_number:
                 logger.info(
