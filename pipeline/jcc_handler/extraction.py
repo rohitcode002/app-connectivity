@@ -2,8 +2,8 @@
 jcc_handler/extraction.py — PDF table extraction logic
 ========================================================
 Uses a column-name gate to find connectivity/pooling station pages in
-JCC Meeting PDFs, then extracts the target rows with an LLM primary path
-and a camelot table fallback.
+JCC Meeting PDFs, then extracts the target rows using pdfplumber's
+table detection (primary) with camelot as fallback.
 
 Edit this file to change how tables are detected, headers are matched,
 or data rows are parsed.
@@ -16,8 +16,13 @@ import time
 from datetime import date, datetime
 from typing import Optional
 
-import camelot
 import pdfplumber
+
+try:
+    import camelot
+    _HAS_CAMELOT = True
+except ImportError:
+    _HAS_CAMELOT = False
 
 from config import MODEL
 from pipeline.jcc_handler.models import (
@@ -286,50 +291,67 @@ def page_passes_gate(text: str) -> bool:
     )
 
 
-def _camelot_tables(pdf_path: str, page_number: int) -> list:
-    """Extract tables from a single page using camelot (lattice → stream fallback)."""
-    try:
-        tables = camelot.read_pdf(
-            pdf_path, pages=str(page_number), flavor='lattice',
-            suppress_stdout=True,
-        )
-        if tables and tables.n:
-            return tables
-    except Exception:
-        pass
+def _pdfplumber_tables(page) -> list[list[list[str]]]:
+    """Extract tables from a pdfplumber page object.
 
+    Returns a list of tables, each table being a list of rows,
+    each row being a list of cell strings.
+    """
     try:
-        tables = camelot.read_pdf(
-            pdf_path, pages=str(page_number), flavor='stream',
-            suppress_stdout=True,
-        )
-        if tables and tables.n:
-            return tables
+        raw_tables = page.extract_tables() or []
     except Exception:
-        pass
+        raw_tables = []
 
+    tables: list[list[list[str]]] = []
+    for tbl in raw_tables:
+        if not tbl or len(tbl) < 2:
+            continue
+        rows = []
+        for row in tbl:
+            rows.append([str(c) if c else "" for c in row])
+        tables.append(rows)
+    return tables
+
+
+def _camelot_tables_fallback(pdf_path: str, page_number: int) -> list[list[list[str]]]:
+    """Fallback: extract tables using camelot when pdfplumber finds nothing.
+
+    Tries lattice first, then stream.
+    """
+    if not _HAS_CAMELOT:
+        return []
+
+    for flavor in ('lattice', 'stream'):
+        try:
+            tables = camelot.read_pdf(
+                pdf_path, pages=str(page_number), flavor=flavor,
+                suppress_stdout=True,
+            )
+            if tables and tables.n:
+                result = []
+                for tbl in tables:
+                    rows = []
+                    for _, row in tbl.df.iterrows():
+                        rows.append([str(v) if v else "" for v in row.values])
+                    if len(rows) >= 2:
+                        result.append(rows)
+                if result:
+                    return result
+        except Exception:
+            pass
     return []
 
 
-def _camelot_table_to_list(table) -> list[list[str]]:
-    """Convert a camelot table DataFrame to list of lists (same format as pdfplumber)."""
-    rows: list[list[str]] = []
-    for _, row in table.df.iterrows():
-        rows.append([str(v) if v else "" for v in row.values])
-    return rows
-
-
-def _page_table_text(pdf_path: str, page_number: int) -> str:
-    """Build a table-cell text view of the page for LLM context using camelot."""
-    tables = _camelot_tables(pdf_path, page_number)
+def _page_table_text_from_tables(tables: list[list[list[str]]]) -> str:
+    """Build a table-cell text view from pre-extracted tables for LLM context."""
     if not tables:
         return ""
 
     rendered: list[str] = []
-    for table_idx, table in enumerate(tables, 1):
+    for table_idx, tbl in enumerate(tables, 1):
         rows = []
-        for _, row in table.df.iterrows():
-            rows.append(" | ".join(_clean_multiline(str(v)) for v in row.values))
+        for row in tbl:
+            rows.append(" | ".join(_clean_multiline(c) for c in row))
         if rows:
             rendered.append(f"Table {table_idx}:\n" + "\n".join(rows))
     return "\n\n".join(rendered)
@@ -513,13 +535,17 @@ def _add_computed_fields(row: dict) -> dict:
 
 
 def extract_page_data(
-    pdf_path: str,
+    page,
     page_number: int,
+    pdf_path: str = "",
     page_text: str = "",
     continuation: bool = False,
     prev_col_map: dict[str, int] | None = None,
 ) -> tuple[Optional[dict], dict[str, int] | None]:
-    """Extract the connectivity table from a single page using camelot.
+    """Extract the connectivity table from a single page.
+
+    Uses pdfplumber as primary extractor (clean cell text) with
+    camelot as fallback when pdfplumber finds no tables.
 
     Returns a tuple of:
       - dict with page metadata and row dicts (or None if no table)
@@ -528,14 +554,22 @@ def extract_page_data(
     When *continuation* is True, we accept tables even without a header
     row, using the column mapping from the previous page.
     """
-    tables = _camelot_tables(pdf_path, page_number)
-    if not tables:
+    # Primary: pdfplumber
+    all_tables = _pdfplumber_tables(page)
+
+    # Fallback: camelot (only if pdfplumber found nothing)
+    extraction_method = "pdfplumber"
+    if not all_tables and pdf_path:
+        all_tables = _camelot_tables_fallback(pdf_path, page_number)
+        if all_tables:
+            extraction_method = "camelot_fallback"
+
+    if not all_tables:
         return None, prev_col_map
 
     target = None
     is_header_page = False
-    for table in tables:
-        tbl = _camelot_table_to_list(table)
+    for tbl in all_tables:
         if _is_target_table(tbl):
             target = tbl
             is_header_page = True
@@ -546,8 +580,7 @@ def extract_page_data(
     if target is None and continuation and prev_col_map:
         largest = None
         max_rows = 0
-        for table in tables:
-            tbl = _camelot_table_to_list(table)
+        for tbl in all_tables:
             if len(tbl) > max_rows:
                 max_rows = len(tbl)
                 largest = tbl
@@ -578,6 +611,7 @@ def extract_page_data(
         "page_number": page_number,
         "raw_text":    page_text,
         "rows":        rows,
+        "extraction_method": extraction_method,
     }
     return result, col_map
 
@@ -585,14 +619,16 @@ def extract_page_data(
 # ── Single-PDF extraction ────────────────────────────────────────────────────
 
 def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[dict]:
-    """Extract all matching pages from one JCC PDF using camelot only.
+    """Extract all matching pages from one JCC PDF.
+
+    Uses pdfplumber for primary table extraction (cleaner cell text)
+    with camelot as fallback when pdfplumber finds no tables.
 
     For each page:
-      1. Extract tables with camelot (lattice → stream fallback)
+      1. Extract tables with pdfplumber (primary) or camelot (fallback)
       2. Check if any table contains the target columns
       3. If yes → extract data rows from that table
-      4. If no  → check pdfplumber text for continuation keywords;
-         if previous page was a match, treat as continuation
+      4. If no  → if previous page was a match, treat as continuation
 
     After extraction, runs postprocessing to:
       1. Merge continuation rows (page-spanning rows with empty pooling_station)
@@ -614,23 +650,25 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
 
         for i in range(limit):
             page_number = i + 1
-            page_text = pdf.pages[i].extract_text() or ""
+            plumber_page = pdf.pages[i]
+            page_text = plumber_page.extract_text() or ""
 
             # Decide whether to try continuation extraction
             is_continuation = in_table_region and consecutive_misses < _MAX_CONTINUATION_GAP
 
             result, col_map = extract_page_data(
-                pdf_path, page_number,
+                plumber_page, page_number,
+                pdf_path=pdf_path,
                 page_text=page_text,
                 continuation=is_continuation,
                 prev_col_map=active_col_map,
             )
 
             if result is not None and result.get("rows"):
-                result["extraction_method"] = "camelot_table"
                 row_count = len(result["rows"])
+                method = result.get("extraction_method", "pdfplumber")
                 tag = "cont" if is_continuation and not col_map else "hdr"
-                print(f"  ✓ Page {page_number:3d} → {row_count} data rows [{tag}]")
+                print(f"  ✓ Page {page_number:3d} → {row_count} data rows [{tag}] ({method})")
                 all_pages.append(result)
                 in_table_region = True
                 consecutive_misses = 0
