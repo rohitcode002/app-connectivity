@@ -36,6 +36,7 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import pdfplumber
@@ -119,6 +120,12 @@ def _extract_meeting_number(text: str) -> Optional[str]:
     return None
 
 
+def _extract_meeting_number_from_filename(pdf_path: str) -> Optional[str]:
+    """Fallback meeting number from filenames like '45th CMETS-NR.pdf'."""
+    stem = Path(pdf_path).stem
+    return _extract_meeting_number(stem)
+
+
 # ── Meeting date extraction ──────────────────────────────────────────────────
 
 def _extract_meeting_date(text: str) -> Optional[str]:
@@ -137,7 +144,7 @@ def _extract_meeting_date(text: str) -> Optional[str]:
     pattern = (
         r"(\d{1,2})\s*(?:st|nd|rd|th)?\s+"
         rf"({month_names})\s+"
-        r"(\d{{4}})"
+        r"(\d{4})"
     )
     m = re.search(pattern, text, re.IGNORECASE)
     if m:
@@ -161,6 +168,16 @@ def _extract_meeting_date(text: str) -> Optional[str]:
         year = int(m.group(3))
         month = _MONTHS.get(month_name)
         if month and 1 <= day <= 31 and 2000 <= year <= 2099:
+            return f"{day:02d}.{month:02d}.{year}"
+
+    # Pattern 3: numeric dates used in CMETS headers, e.g. "held on 10.04.2026"
+    # or "held on 23-03-2026". Only called on the first readable meeting page.
+    pattern3 = r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b"
+    for m in re.finditer(pattern3, text, re.IGNORECASE):
+        day = int(m.group(1))
+        month = int(m.group(2))
+        year = int(m.group(3))
+        if 1 <= day <= 31 and 1 <= month <= 12 and 2000 <= year <= 2099:
             return f"{day:02d}.{month:02d}.{year}"
 
     return None
@@ -225,7 +242,7 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
     """Extract meeting metadata from a CMETS PDF.
 
     Steps:
-      1. Read the first page → extract meeting number + date
+      1. Read the first readable meeting page → extract meeting number + date
       2. Read ALL pages → count GNA vs LTA keywords
       3. Classify as "GNA" or "LTA" based on keyword ratio
       4. Place meeting number + date into the appropriate columns
@@ -248,12 +265,22 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                 logger.warning("[MeetingClassifier] PDF has no pages: %s", pdf_path)
                 return meta
 
-            # ── Step 1: First page — extract meeting number + date ─────────
-            first_page_text = pdf.pages[0].extract_text(
-                x_tolerance=3, y_tolerance=3,
-            ) or ""
+            # ── Step 1: First readable meeting page — number + date ────────
+            #
+            # Several downloaded CMETS minutes PDFs contain blank/cover pages
+            # before the actual first page. The meeting date still comes only
+            # from that first readable meeting page, not from arbitrary later
+            # agenda/table pages.
+            first_page_text = ""
+            for page in pdf.pages:
+                candidate = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+                if candidate.strip():
+                    first_page_text = candidate
+                    break
 
             meta.meeting_number = _extract_meeting_number(first_page_text)
+            if not meta.meeting_number:
+                meta.meeting_number = _extract_meeting_number_from_filename(pdf_path)
             meta.meeting_date = _extract_meeting_date(first_page_text)
 
             if not meta.meeting_number:
@@ -263,10 +290,10 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                 )
 
             if not meta.meeting_date:
-                # Try page 2 as fallback for date (some PDFs have date on second page)
-                if len(pdf.pages) > 1:
-                    page2 = pdf.pages[1].extract_text(x_tolerance=3, y_tolerance=3) or ""
-                    meta.meeting_date = _extract_meeting_date(page2)
+                logger.info(
+                    "[MeetingClassifier] Could not extract meeting date from first readable page: %s",
+                    pdf_path,
+                )
 
             # ── Step 2: Full PDF — count GNA vs LTA keywords ──────────────
             all_text_parts: list[str] = []

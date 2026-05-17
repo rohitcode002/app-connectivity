@@ -138,6 +138,38 @@ def _agg_stats(all_serialized: list[dict]) -> dict:
     }
 
 
+def _meeting_meta_has_values(data: dict) -> bool:
+    meeting = data.get("meeting_meta") or {}
+    return any(meeting.get(col) for col in _MEETING_COLS)
+
+
+def _write_excel_snapshot(
+    all_data: list[dict],
+    xlsx: Path,
+    started_at: datetime,
+    finished_at: datetime,
+    runtime_s: float,
+) -> Path:
+    """Write the current accumulated CMETS rows to Excel."""
+    stats = _agg_stats(all_data)
+    return export_to_excel(
+        rows         = _flatten(all_data),
+        output_path  = xlsx,
+        sheet_name   = "Extracted Data",
+        column_order = CMETS_COLUMNS,
+        summary_rows = [
+            ("Run started at",           started_at.isoformat(timespec="seconds")),
+            ("Last updated at",          finished_at.isoformat(timespec="seconds")),
+            ("Runtime so far (seconds)", round(runtime_s, 2)),
+            ("PDFs processed",           stats["pdfs_processed"]),
+            ("Total pages extracted",    stats["total_pages_extracted"]),
+            ("Total pages passed gate",  stats["total_pages_passed_gate"]),
+            ("Total pages skipped",      stats["total_pages_skipped"]),
+            ("Total rows",               stats["total_rows"]),
+        ],
+    )
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def run_cmets_extraction(
@@ -202,7 +234,27 @@ def run_cmets_extraction(
 
         if cache.exists():
             print(f"\n[{idx}/{len(pdf_paths)}] SKIP    {pdf_path.name}")
-            all_data.append(_load_json(cache))
+            data = _load_json(cache)
+            if not _meeting_meta_has_values(data):
+                print(f"  [M] Repairing cached meeting metadata …", end=" ", flush=True)
+                meeting_meta = classify_meeting(str(pdf_path))
+                print(
+                    f"#{meeting_meta.meeting_number or '?'} "
+                    f"({meeting_meta.meeting_date or 'no date'}) → "
+                    f"{meeting_meta.classification} "
+                    f"(GNA:{meeting_meta.gna_count} LTA:{meeting_meta.lta_count})"
+                )
+                data["meeting_meta"] = meeting_meta.as_row_dict()
+                _save_json(data, cache)
+            all_data.append(data)
+            out_path = _write_excel_snapshot(
+                all_data,
+                xlsx,
+                started_at,
+                datetime.now(),
+                perf_counter() - t0,
+            )
+            print(f"  → Excel updated: {out_path.name}")
             continue
 
         print(f"\n[{idx}/{len(pdf_paths)}] EXTRACT {pdf_path.name}")
@@ -229,6 +281,14 @@ def run_cmets_extraction(
         _save_json(data, cache)
         print(f"  → JSON: {cache.name}")
         all_data.append(data)
+        out_path = _write_excel_snapshot(
+            all_data,
+            xlsx,
+            started_at,
+            datetime.now(),
+            perf_counter() - t0,
+        )
+        print(f"  → Excel updated: {out_path.name}")
 
     runtime_s   = perf_counter() - t0
     finished_at = datetime.now()
@@ -243,22 +303,12 @@ def run_cmets_extraction(
     print(f"    Runtime (s)   : {runtime_s:.1f}")
     print("=" * 64)
 
-    flat_rows = _flatten(all_data)
-    out_path  = export_to_excel(
-        rows         = flat_rows,
-        output_path  = xlsx,
-        sheet_name   = "Extracted Data",
-        column_order = CMETS_COLUMNS,
-        summary_rows = [
-            ("Run started at",           started_at.isoformat(timespec="seconds")),
-            ("Run finished at",          finished_at.isoformat(timespec="seconds")),
-            ("Total runtime (seconds)",  round(runtime_s, 2)),
-            ("PDFs processed",           stats["pdfs_processed"]),
-            ("Total pages extracted",    stats["total_pages_extracted"]),
-            ("Total pages passed gate",  stats["total_pages_passed_gate"]),
-            ("Total pages skipped",      stats["total_pages_skipped"]),
-            ("Total rows",               stats["total_rows"]),
-        ],
+    out_path = _write_excel_snapshot(
+        all_data,
+        xlsx,
+        started_at,
+        finished_at,
+        runtime_s,
     )
     print(f"\n[CMETS] cmets.xlsx → {out_path}")
     return out_path
