@@ -79,12 +79,26 @@ CMETS_EXCEL : Path = _START_DIR / "excels" / "cmets.xlsx"
 
 # ─── Serialisation ────────────────────────────────────────────────────────────
 
+def _inject_meeting_meta_into_rows(data: dict, meeting_meta: dict | None) -> dict:
+    """Write meeting metadata directly into every row dict in the JSON payload."""
+    if not meeting_meta:
+        return data
+
+    for page in data.get("results", []):
+        for row in page.get("rows", []):
+            if isinstance(row, dict):
+                for col in _MEETING_COLS:
+                    row[col] = meeting_meta.get(col)
+    return data
+
+
 def _serialize(result: PipelineResult, meeting_meta: dict | None = None) -> dict:
     out = result.model_dump()
     for i, pr in enumerate(out["results"]):
         pr["rows"] = [r.model_dump(by_alias=True) for r in result.results[i].rows]
     if meeting_meta:
         out["meeting_meta"] = meeting_meta
+        _inject_meeting_meta_into_rows(out, meeting_meta)
     return out
 
 
@@ -119,7 +133,7 @@ def _flatten(all_serialized: list[dict]) -> list[dict]:
                 rec = {"PDF": pdf_path, "Page Number": pnum}
                 # Inject meeting columns
                 for mcol in _MEETING_COLS:
-                    rec[mcol] = meeting.get(mcol)
+                    rec[mcol] = meeting.get(mcol) or row.get(mcol)
                 # Row-level columns
                 for col in CMETS_COLUMNS:
                     if col not in rec:  # skip PDF, Page, meeting cols already set
@@ -311,7 +325,9 @@ def run_cmets_extraction(
         if cache.exists():
             print(f"  [X] SKIP extraction — cache found")
             data = _load_json(cache)
-            data["meeting_meta"] = meeting_meta.as_row_dict()
+            row_meeting_meta = meeting_meta.as_row_dict()
+            data["meeting_meta"] = row_meeting_meta
+            _inject_meeting_meta_into_rows(data, row_meeting_meta)
             _save_json(data, cache)
             all_data.append(data)
             out_path = _append_pdf_to_excel(
