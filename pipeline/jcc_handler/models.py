@@ -8,16 +8,43 @@ canonical column names for JCC meeting PDFs.
 from __future__ import annotations
 
 # Keywords that must ALL appear on a page for it to be considered a target page
-REQUIRED_KEYWORDS = ["Pooling", "Quantum", "Connectivity"]
+REQUIRED_KEYWORDS = ["Quantum", "Connectivity"]
 
-# Fragments (lower-cased) that identify the connectivity table header row
+# Fragments (lower-cased) that identify the connectivity table header row.
+# Each entry is a tuple of alternatives — matching ANY alternative counts as
+# one hit.  This accommodates regional naming differences:
+#   Northern: "Connectivity Applicant", "Connectivity Quantum", "Connectivity Start"
+#   Eastern:  "Name of Grantee", "GNA Quantum", "Start date of GNA"
+#   Western:  "Name of Grantee", "Conn. Under GNA-Quantum"
+#   Southern: "Connectivity Grantee/Applicant", "Connectivity under GNA-Quantum"
+TARGET_COLUMN_FRAGMENT_GROUPS = [
+    # Applicant / Grantee column
+    ("applicant", "grantee"),
+    # Quantum column
+    ("quantum",),
+    # Schedule / Commissioning columns
+    ("gen comm", "comm. schedule", "commissioning"),
+    # "Schedule as per" or just "schedule"
+    ("schedule as per", "schedule"),
+    # Start date / Connectivity date column
+    ("connectivity start", "start date", "operationalization"),
+    # Pooling station (only in some regions, but adds confidence)
+    ("pooling",),
+]
+
+# Flat list kept for backward compatibility with page_passes_gate
 TARGET_COLUMN_FRAGMENTS = [
     "pooling",
     "applicant",
+    "grantee",
     "quantum",
     "gen comm",
+    "comm. schedule",
+    "commissioning",
     "schedule as per",
     "connectivity start",
+    "start date",
+    "operationalization",
 ]
 
 # Raw table columns exposed in JSON output. Keep these narrow: JCC extraction

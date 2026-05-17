@@ -23,6 +23,7 @@ from config import MODEL
 from pipeline.jcc_handler.models import (
     REQUIRED_KEYWORDS,
     TARGET_COLUMN_FRAGMENTS,
+    TARGET_COLUMN_FRAGMENT_GROUPS,
     COLUMN_NAMES,
 )
 from pipeline.shared_utils import parse_json
@@ -81,17 +82,27 @@ def _clean_multiline(text) -> str:
 
 
 def _is_target_table(table: list) -> bool:
-    """Return True if the table looks like the connectivity table."""
+    """Return True if the table looks like the connectivity table.
+
+    Uses grouped fragments so that regional naming differences
+    (e.g. 'Grantee' vs 'Applicant', 'GNA Quantum' vs 'Connectivity Quantum')
+    each count as one hit.
+    """
     if not table or len(table) < 2:
         return False
+    # Gather text from first 5 rows to account for multi-row headers
     header_text = " ".join(
         _clean(c).lower()
-        for row in table[:3]
+        for row in table[:5]
         for c in (row or [])
         if c
     )
-    hits = sum(1 for kw in TARGET_COLUMN_FRAGMENTS if kw in header_text)
-    return hits >= 3
+    # Count how many fragment groups have at least one match
+    group_hits = sum(
+        1 for group in TARGET_COLUMN_FRAGMENT_GROUPS
+        if any(frag in header_text for frag in group)
+    )
+    return group_hits >= 3
 
 
 def _normalise_row(row: list, n_cols: int) -> list[str]:
@@ -104,13 +115,104 @@ def _normalise_row(row: list, n_cols: int) -> list[str]:
     return cleaned
 
 
-def _requested_columns_from_pdf_row(raw_row: list) -> dict:
+# Keywords that indicate a row is a header (not data)
+_HEADER_ROW_KEYWORDS = [
+    "pooling", "grantee scope", "under ists", "grantee", "applicant",
+    "quantum", "commissioning", "schedule", "connectivity start",
+    "start date", "sl.", "sl .", "s .", "under applicant",
+    "dedicated line", "ists scope", "operationalization",
+    "remarks", "deliberation",
+]
+
+
+def _detect_column_mapping(table: list) -> dict[str, int]:
+    """Auto-detect which column index maps to each target field.
+
+    Scans the first 5 rows (header area) for keyword matches and
+    returns a mapping of canonical field names to column indices.
+    Falls back to positional defaults if detection fails.
+    """
+    n_cols = max((len(row) for row in table[:5] if row), default=0)
+    if n_cols == 0:
+        return {}
+
+    # Build per-column text from the header rows
+    col_texts: list[str] = []
+    for col_idx in range(n_cols):
+        parts = []
+        for row in table[:5]:
+            if row and col_idx < len(row) and row[col_idx]:
+                parts.append(_clean(row[col_idx]).lower())
+        col_texts.append(" ".join(parts))
+
+    mapping: dict[str, int] = {}
+
+    # Applicant / Grantee column
+    for idx, txt in enumerate(col_texts):
+        if "applicant" in txt or "grantee" in txt:
+            mapping["connectivity_applicant"] = idx
+            break
+
+    # Quantum column
+    for idx, txt in enumerate(col_texts):
+        if "quantum" in txt or "quant" in txt:
+            mapping["connectivity_quantum_mw"] = idx
+            break
+
+    # Pooling station (may be absent in some regions)
+    for idx, txt in enumerate(col_texts):
+        if "pooling" in txt and idx != mapping.get("connectivity_applicant"):
+            mapping["pooling_station"] = idx
+            break
+
+    # Schedule column — look for the CURRENT JCC schedule, not previous
+    # Typically there are two schedule column blocks; take the second one
+    schedule_candidates = []
+    for idx, txt in enumerate(col_texts):
+        if idx in mapping.values():
+            continue
+        if ("schedule as per" in txt or "schedule" in txt) and (
+            "commissioning" in txt or "gen comm" in txt or "scope" in txt
+            or "applicant" in txt
+        ):
+            schedule_candidates.append(idx)
+    # Prefer the column labeled as "current" or the later one
+    if schedule_candidates:
+        for idx in schedule_candidates:
+            if any(kw in col_texts[idx] for kw in ["current", "mar", "jun", "sep", "dec"]):
+                mapping["schedule_as_per_current_jcc"] = idx
+                break
+        if "schedule_as_per_current_jcc" not in mapping:
+            # Take the last schedule candidate (usually the updated one)
+            mapping["schedule_as_per_current_jcc"] = schedule_candidates[-1]
+
+    # Connectivity start date / effectiveness date
+    for idx, txt in enumerate(col_texts):
+        if idx in mapping.values():
+            continue
+        if ("start date" in txt or "connectivity start" in txt
+                or "effectiveness" in txt or "operationalization" in txt):
+            mapping["connectivity_start_date_under_gna"] = idx
+            break
+
+    return mapping
+
+
+def _requested_columns_from_pdf_row(raw_row: list, col_map: dict[str, int] | None = None) -> dict:
     """Map a full JCC table row to the requested five raw columns.
 
-    The source table normally has 8-9 columns:
-    sr, pooling, applicant, quantum, previous schedule, current grantee
-    scope, ISTS scope, connectivity/effectiveness date, remarks.
+    If *col_map* is provided (auto-detected from the header), uses it.
+    Otherwise falls back to positional defaults (8-9 column layout).
     """
+    if col_map:
+        cells = [_clean(c) for c in (raw_row or [])]
+        n = len(cells)
+        return {
+            field: cells[idx] if idx < n else ""
+            for field, idx in col_map.items()
+        }
+
+    # Legacy positional fallback
     cells = _normalise_row(raw_row, 9)
     return {
         "pooling_station": cells[1],
@@ -122,11 +224,24 @@ def _requested_columns_from_pdf_row(raw_row: list) -> dict:
 
 
 def _count_header_rows(table: list) -> int:
-    """Count how many leading rows are header/sub-header rows."""
+    """Count how many leading rows are header/sub-header rows.
+
+    Uses broad keyword matching to work across all regional naming
+    conventions.
+    """
     count = 0
     for row in table:
         row_text = " ".join(_clean(c).lower() for c in row if c)
-        if any(kw in row_text for kw in ["pooling", "grantee scope", "under ists"]):
+        if not row_text.strip():
+            count += 1
+            continue
+        # A row is a header row if it contains header-like keywords
+        # and does NOT look like a data row (starts with a serial number)
+        is_header = any(kw in row_text for kw in _HEADER_ROW_KEYWORDS)
+        # Data rows typically start with a serial number like "1.", "2.", etc.
+        first_cell = _clean(row[0]).strip() if row and row[0] else ""
+        looks_like_data = bool(re.match(r'^\d+\.?$', first_cell))
+        if is_header and not looks_like_data:
             count += 1
         else:
             break
@@ -136,22 +251,39 @@ def _count_header_rows(table: list) -> int:
 # ── Page-level extraction ─────────────────────────────────────────────────────
 
 def page_passes_gate(text: str) -> bool:
-    """Check whether *text* contains the target JCC table column names."""
+    """Check whether *text* contains the target JCC table column names.
+
+    Uses both grouped fragments and flat fragment counting to handle
+    all regional naming conventions.
+    """
     norm = _clean(text).lower()
     if not norm:
         return False
 
-    hits = sum(1 for frag in TARGET_COLUMN_FRAGMENTS if frag in norm)
+    # Grouped fragment check (more accurate)
+    group_hits = sum(
+        1 for group in TARGET_COLUMN_FRAGMENT_GROUPS
+        if any(frag in norm for frag in group)
+    )
+
+    # Flat fragment check (broader)
+    flat_hits = sum(1 for frag in TARGET_COLUMN_FRAGMENTS if frag in norm)
+
     has_core_columns = (
-        "pooling" in norm
-        and "applicant" in norm
+        ("pooling" in norm or "grantee" in norm)
+        and ("applicant" in norm or "grantee" in norm)
         and "quantum" in norm
-        and "connectivity start" in norm
+        and ("connectivity start" in norm or "start date" in norm)
     )
     # Legacy broad gate kept as a weak fallback for PDFs where header wrapping
     # makes exact fragments disappear from pdfplumber text.
     legacy_hits = sum(1 for kw in REQUIRED_KEYWORDS if kw.lower() in norm)
-    return has_core_columns or hits >= 4 or (legacy_hits == len(REQUIRED_KEYWORDS) and "schedule" in norm)
+    return (
+        has_core_columns
+        or group_hits >= 3
+        or flat_hits >= 4
+        or (legacy_hits == len(REQUIRED_KEYWORDS) and "schedule" in norm)
+    )
 
 
 def _camelot_tables(pdf_path: str, page_number: int) -> list:
@@ -380,41 +512,74 @@ def _add_computed_fields(row: dict) -> dict:
     return output
 
 
-def extract_page_data(pdf_path: str, page_number: int, page_text: str = "") -> Optional[dict]:
+def extract_page_data(
+    pdf_path: str,
+    page_number: int,
+    page_text: str = "",
+    continuation: bool = False,
+    prev_col_map: dict[str, int] | None = None,
+) -> tuple[Optional[dict], dict[str, int] | None]:
     """Extract the connectivity table from a single page using camelot.
 
-    Returns a dict with page metadata and a list of row dicts,
-    or None if no target table is found.
+    Returns a tuple of:
+      - dict with page metadata and row dicts (or None if no table)
+      - detected column mapping (for use on subsequent continuation pages)
+
+    When *continuation* is True, we accept tables even without a header
+    row, using the column mapping from the previous page.
     """
     tables = _camelot_tables(pdf_path, page_number)
     if not tables:
-        return None
+        return None, prev_col_map
 
     target = None
+    is_header_page = False
     for table in tables:
         tbl = _camelot_table_to_list(table)
         if _is_target_table(tbl):
             target = tbl
+            is_header_page = True
             break
 
-    if target is None:
-        return None
+    # If no header-bearing table found but we're in continuation mode,
+    # take the largest table on the page as continuation data
+    if target is None and continuation and prev_col_map:
+        largest = None
+        max_rows = 0
+        for table in tables:
+            tbl = _camelot_table_to_list(table)
+            if len(tbl) > max_rows:
+                max_rows = len(tbl)
+                largest = tbl
+        if largest and max_rows >= 1:
+            target = largest
+            is_header_page = False
 
-    header_rows = _count_header_rows(target)
-    data_rows   = target[header_rows:]
+    if target is None:
+        return None, prev_col_map if continuation else None
+
+    # Detect column mapping from header, or reuse from previous page
+    col_map = _detect_column_mapping(target) if is_header_page else prev_col_map
+
+    header_count = _count_header_rows(target) if is_header_page else 0
+    data_rows = target[header_count:]
 
     rows = []
     for raw_row in data_rows:
         if not any(_clean(cell) for cell in (raw_row or [])):
             continue
-        row = _requested_columns_from_pdf_row(raw_row)
+        row = _requested_columns_from_pdf_row(raw_row, col_map)
+        # Ensure all canonical columns exist
+        for col in COLUMN_NAMES:
+            row.setdefault(col, "")
         rows.append(_add_computed_fields(row))
 
-    return {
+    result = {
         "page_number": page_number,
         "raw_text":    page_text,
         "rows":        rows,
     }
+    return result, col_map
 
 
 # ── Single-PDF extraction ────────────────────────────────────────────────────
@@ -426,7 +591,8 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
       1. Extract tables with camelot (lattice → stream fallback)
       2. Check if any table contains the target columns
       3. If yes → extract data rows from that table
-      4. If no  → skip the page
+      4. If no  → check pdfplumber text for continuation keywords;
+         if previous page was a match, treat as continuation
 
     After extraction, runs postprocessing to:
       1. Merge continuation rows (page-spanning rows with empty pooling_station)
@@ -435,6 +601,10 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
     from pipeline.jcc_handler.jcc_postprocess import postprocess_all_pages
 
     all_pages: list[dict] = []
+    in_table_region = False       # True after we detect a header page
+    active_col_map: dict | None = None   # column mapping from last header page
+    consecutive_misses = 0        # pages without data since last match
+    _MAX_CONTINUATION_GAP = 2     # allow up to N blank pages in a table run
 
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
@@ -446,15 +616,34 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
             page_number = i + 1
             page_text = pdf.pages[i].extract_text() or ""
 
-            # Camelot-only: extract tables → check columns → extract rows
-            result = extract_page_data(pdf_path, page_number, page_text=page_text)
-            if result is None:
-                continue
+            # Decide whether to try continuation extraction
+            is_continuation = in_table_region and consecutive_misses < _MAX_CONTINUATION_GAP
 
-            result["extraction_method"] = "camelot_table"
-            row_count = len(result["rows"])
-            print(f"  ✓ Page {page_number:3d} → {row_count} data rows")
-            all_pages.append(result)
+            result, col_map = extract_page_data(
+                pdf_path, page_number,
+                page_text=page_text,
+                continuation=is_continuation,
+                prev_col_map=active_col_map,
+            )
+
+            if result is not None and result.get("rows"):
+                result["extraction_method"] = "camelot_table"
+                row_count = len(result["rows"])
+                tag = "cont" if is_continuation and not col_map else "hdr"
+                print(f"  ✓ Page {page_number:3d} → {row_count} data rows [{tag}]")
+                all_pages.append(result)
+                in_table_region = True
+                consecutive_misses = 0
+                if col_map:
+                    active_col_map = col_map
+            else:
+                if in_table_region:
+                    consecutive_misses += 1
+                    if consecutive_misses >= _MAX_CONTINUATION_GAP:
+                        # Table region ended
+                        in_table_region = False
+                        active_col_map = None
+                        consecutive_misses = 0
 
     # ── Postprocessing: merge continuations + recompute COD/effective_date ──
     if all_pages:

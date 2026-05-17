@@ -171,8 +171,11 @@ def run_jcc_extraction(
     print(f"  Output dir  : {out}")
     print(f"  Excel output: {xlsx}")
 
-    # Recursive scan for PDFs
-    pdf_files = sorted(src.rglob("*.pdf"))
+    # Recursive scan for PDFs — only inside "Minutes" folders
+    pdf_files = sorted(
+        p for p in src.rglob("*.pdf")
+        if any(part.lower() == "minutes" for part in p.parts)
+    )
     if not pdf_files:
         print(f"  [JCC] No PDFs found in: {src}")
         print("=" * 64)
