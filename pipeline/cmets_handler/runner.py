@@ -143,8 +143,11 @@ def _agg_stats(all_serialized: list[dict]) -> dict:
     }
 
 
-def _init_excel_workbook(xlsx: Path) -> Path:
-    """Create a fresh CMETS workbook with headers before per-PDF appends."""
+def _ensure_excel_workbook(xlsx: Path) -> Path:
+    """Create the CMETS workbook with headers if it does not already exist."""
+    if xlsx.exists():
+        return xlsx.resolve()
+
     opx = _get_openpyxl()
     wb = opx.Workbook()
     ws = wb.active
@@ -159,6 +162,26 @@ def _init_excel_workbook(xlsx: Path) -> Path:
     return xlsx
 
 
+def _remove_existing_pdf_rows(ws, pdf_path: str) -> int:
+    """Delete stale rows for this PDF name before appending current JSON rows."""
+    if ws.max_row < 2:
+        return 0
+
+    headers = [cell.value for cell in ws[1]]
+    if "PDF" not in headers:
+        return 0
+
+    pdf_col = headers.index("PDF") + 1
+    target_name = Path(pdf_path).name
+    removed = 0
+    for row_idx in range(ws.max_row, 1, -1):
+        value = ws.cell(row=row_idx, column=pdf_col).value
+        if value and Path(str(value)).name == target_name:
+            ws.delete_rows(row_idx, 1)
+            removed += 1
+    return removed
+
+
 def _append_pdf_to_excel(
     data: dict,
     xlsx: Path,
@@ -170,13 +193,15 @@ def _append_pdf_to_excel(
     """Append one PDF's flattened JSON rows into the existing CMETS workbook."""
     opx = _get_openpyxl()
     if not xlsx.exists():
-        _init_excel_workbook(xlsx)
+        _ensure_excel_workbook(xlsx)
 
     wb = opx.load_workbook(xlsx)
     ws = wb["Extracted Data"] if "Extracted Data" in wb.sheetnames else wb.active
     if ws.max_row == 0:
         ws.append(CMETS_COLUMNS)
         _apply_header_style(ws, opx)
+
+    _remove_existing_pdf_rows(ws, data.get("pdf_path", ""))
 
     for record in _flatten([data]):
         ws.append([record.get(col) for col in CMETS_COLUMNS])
@@ -266,7 +291,7 @@ def run_cmets_extraction(
     started_at = datetime.now()
     t0         = perf_counter()
     all_data:  list[dict] = []
-    _init_excel_workbook(xlsx)
+    _ensure_excel_workbook(xlsx)
 
     for idx, pdf_path in enumerate(pdf_paths, 1):
         cache = out / f"{pdf_path.stem}.json"
@@ -297,7 +322,7 @@ def run_cmets_extraction(
                 perf_counter() - t0,
                 _agg_stats(all_data),
             )
-            print(f"  → Excel appended: {out_path.name}")
+            print(f"  → Excel appended/verified: {out_path.name}")
             continue
 
         print(f"  [X] EXTRACT {pdf_path.name}")
@@ -322,7 +347,7 @@ def run_cmets_extraction(
             perf_counter() - t0,
             _agg_stats(all_data),
         )
-        print(f"  → Excel appended: {out_path.name}")
+        print(f"  → Excel appended/verified: {out_path.name}")
 
     runtime_s   = perf_counter() - t0
     finished_at = datetime.now()

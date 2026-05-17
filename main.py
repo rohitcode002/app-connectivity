@@ -280,42 +280,38 @@ def _run_extraction(runtime, tracker: PipelineTracker, args) -> None:
     cmets_excel = args.cmets_excel or str(excels_dir / "01_cmets_extracted.xlsx")
     cmets_path  = Path(cmets_excel).resolve()
 
-    # Check if Excel exists; if tracked but missing on disk, regenerate
-    if not Path(cmets_excel).exists():
-        print("\n[Pipeline] Module 1 — CMETS extraction (Minutes only)")
+    print("\n[Pipeline] Module 1 — CMETS extraction (Minutes only)")
 
-        # Use only the minutes/ subfolder for extraction
-        cmets_src = (
-            Path(args.source_dir)
-            if args.source_dir
-            else _default_pdf_source(
-                "uploads/CTUIL-ISTS-CMETS/minutes",
-                _START_DIR / "source" / "cmets_pdfs" / "minutes",
-            )
+    # Use only the minutes/ subfolder for extraction
+    cmets_src = (
+        Path(args.source_dir)
+        if args.source_dir
+        else _default_pdf_source(
+            "uploads/CTUIL-ISTS-CMETS/minutes",
+            _START_DIR / "source" / "cmets_pdfs" / "minutes",
         )
-        for pdf in sorted(cmets_src.glob("*.pdf")):
-            if not tracker.is_extracted("cmets", pdf.name):
-                dl_id = tracker.get_download_id("cmets", pdf.name)
-                ext_id = tracker.register_extraction("cmets", pdf.name, dl_id)
+    )
+    for pdf in sorted(cmets_src.rglob("*.pdf")):
+        if not tracker.is_extracted("cmets", pdf.name):
+            dl_id = tracker.get_download_id("cmets", pdf.name)
+            tracker.register_extraction("cmets", pdf.name, dl_id)
 
-        cmets_path = run_cmets_extraction(
-            source_dir = str(cmets_src),
-            output_dir = args.output_dir,
-            excel_path = cmets_excel,
-            single_pdf = args.pdf,
-            runtime    = runtime,
-        )
+    cmets_path = run_cmets_extraction(
+        source_dir = str(cmets_src),
+        output_dir = args.output_dir,
+        excel_path = cmets_excel,
+        single_pdf = args.pdf,
+        runtime    = runtime,
+    )
 
-        # Mark extractions as completed & register records
-        for pdf in sorted(cmets_src.glob("*.pdf")):
-            cache_path = Path(args.output_dir or str(_START_DIR / "output" / "cmets_cache")) / f"{pdf.stem}.json"
-            if cache_path.exists():
-                _register_extraction_complete(tracker, "cmets", pdf.name, str(cache_path))
+    # Mark extractions as completed & register records
+    for pdf in sorted(cmets_src.rglob("*.pdf")):
+        cache_path = Path(args.output_dir or str(_START_DIR / "output" / "cmets_cache")) / f"{pdf.stem}.json"
+        if cache_path.exists():
+            _register_extraction_complete(tracker, "cmets", pdf.name, str(cache_path))
 
-        tracker.register_excel("cmets", str(cmets_path), "Extracted Data")
-        print(f"\n[Pipeline] Module 1 complete -> {cmets_path.name}\n")
-    else:
-        print(f"[Pipeline] SKIP  Module 1 — {Path(cmets_excel).name} already exists\n")
+    tracker.register_excel("cmets", str(cmets_path), "Extracted Data")
+    print(f"\n[Pipeline] Module 1 complete -> {cmets_path.name}\n")
 
     if args.skip_effectiveness:
         print("[Pipeline] --skip-effectiveness set. Done.\n")
