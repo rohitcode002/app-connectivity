@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -44,32 +43,6 @@ _CMETS_DOWNLOAD_ROOT : Path = _START_DIR / "output" / "source_output" / "CTUIL-I
 _DOWNLOAD_MINUTES_LC : Path = _CMETS_DOWNLOAD_ROOT / "minutes"
 # Fallback: legacy manual-drop folder
 _LEGACY_SOURCE       : Path = _START_DIR / "source" / "cmets_pdfs"
-
-
-# ─── Ordinal helper ───────────────────────────────────────────────────────────
-
-def _ordinal(value: str | int | None) -> str | None:
-    """Convert a number or ordinal string like '42', '42nd', '45th' to proper ordinal.
-
-    Returns the ordinal string (e.g. '42nd', '45th', '43rd', '1st') or *None*
-    if the input is empty / not parseable.
-    """
-    if value is None:
-        return None
-    s = str(value).strip()
-    if not s:
-        return None
-    # Strip existing suffix to get the raw integer
-    m = re.match(r"(\d+)", s)
-    if not m:
-        return s  # not a recognisable number — pass through
-    n = int(m.group(1))
-    # Determine suffix
-    if 11 <= (n % 100) <= 13:
-        suffix = "th"
-    else:
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix}"
 
 
 def _collect_minutes_pdfs(root: Path) -> list[Path]:
@@ -107,27 +80,15 @@ CMETS_EXCEL : Path = _START_DIR / "excels" / "cmets.xlsx"
 # ─── Serialisation ────────────────────────────────────────────────────────────
 
 def _inject_meeting_meta_into_rows(data: dict, meeting_meta: dict | None) -> dict:
-    """Write meeting metadata directly into every row dict in the JSON payload.
-
-    Values are stored as proper ordinals (e.g. '42nd', '45th').
-    """
+    """Write meeting metadata directly into every row dict in the JSON payload."""
     if not meeting_meta:
         return data
-
-    # Pre-format ordinals once
-    formatted: dict[str, str | None] = {}
-    for col in _MEETING_COLS:
-        raw = meeting_meta.get(col)
-        if col in ("CMETS GNA Approved", "CMETS LTA Approved"):
-            formatted[col] = _ordinal(raw)
-        else:
-            formatted[col] = raw  # dates stay as-is
 
     for page in data.get("results", []):
         for row in page.get("rows", []):
             if isinstance(row, dict):
                 for col in _MEETING_COLS:
-                    row[col] = formatted[col]
+                    row[col] = meeting_meta.get(col)
     return data
 
 
@@ -137,8 +98,6 @@ def _serialize(result: PipelineResult, meeting_meta: dict | None = None) -> dict
         pr["rows"] = [r.model_dump(by_alias=True) for r in result.results[i].rows]
     if meeting_meta:
         out["meeting_meta"] = meeting_meta
-        # Hardcode meeting columns into every row dict so the JSON cache
-        # always carries the values per-row — not just at top-level.
         _inject_meeting_meta_into_rows(out, meeting_meta)
     return out
 
@@ -172,14 +131,9 @@ def _flatten(all_serialized: list[dict]) -> list[dict]:
             pnum = page.get("page_number")
             for row in page.get("rows", []):
                 rec = {"PDF": pdf_path, "Page Number": pnum}
-                # Inject meeting columns — prefer row-level (hardcoded during
-                # _serialize), fall back to top-level meeting_meta.
+                # Inject meeting columns
                 for mcol in _MEETING_COLS:
-                    val = row.get(mcol) or meeting.get(mcol)
-                    # Ensure approval columns are always ordinals
-                    if mcol in ("CMETS GNA Approved", "CMETS LTA Approved"):
-                        val = _ordinal(val)
-                    rec[mcol] = val
+                    rec[mcol] = meeting.get(mcol) or row.get(mcol)
                 # Row-level columns
                 for col in CMETS_COLUMNS:
                     if col not in rec:  # skip PDF, Page, meeting cols already set
