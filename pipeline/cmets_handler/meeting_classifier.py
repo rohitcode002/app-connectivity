@@ -124,9 +124,13 @@ def _extract_meeting_number(text: str) -> Optional[str]:
 
 
 def _extract_meeting_number_from_filename(pdf_path: str) -> Optional[str]:
-    """Extract meeting number from filenames like '45th CMETS-NR.pdf'."""
+    """Extract meeting number from filenames like '45th CMETS-NR.pdf'.
+
+    Uses a negative look-behind instead of \\b so that underscores
+    (which are \\w characters) before digits don't block the match.
+    """
     stem = Path(pdf_path).stem
-    m = re.search(r"\b(\d{1,3})\s*(st|nd|rd|th)\b", stem, re.IGNORECASE)
+    m = re.search(r"(?<!\d)(\d{1,3})\s*(st|nd|rd|th)\b", stem, re.IGNORECASE)
     if m:
         return f"{m.group(1)}{m.group(2).lower()}"
     return _extract_meeting_number(stem)
