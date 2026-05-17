@@ -130,7 +130,7 @@ Reads **RE Effectiveness / Connectivity Status** PDF reports → extracts curren
 1. **PDF Discovery** — recursive scan for `*.pdf`
 2. **Cache Check** — skip if JSON exists
 3. **LLM Extraction** — text batched into ~10,000-char chunks → GPT-4o-mini (3 retries)
-4. **Fallback** — pdfplumber table detection when no API key
+4. **Fallback** — Camelot table detection when no API key
 5. **Deduplication** — by `application_id + name_of_applicant`
 
 ### Columns Extracted

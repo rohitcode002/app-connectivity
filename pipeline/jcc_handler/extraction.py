@@ -420,14 +420,14 @@ def extract_page_data(pdf_path: str, page_number: int, page_text: str = "") -> O
 # ── Single-PDF extraction ────────────────────────────────────────────────────
 
 def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[dict]:
-    """Extract all matching pages from one JCC PDF.
+    """Extract all matching pages from one JCC PDF using camelot only.
 
-    Parameters
-    ----------
-    max_pages : int
-        Maximum number of pages to scan per PDF. -1 means all pages.
+    For each page:
+      1. Extract tables with camelot (lattice → stream fallback)
+      2. Check if any table contains the target columns
+      3. If yes → extract data rows from that table
+      4. If no  → skip the page
 
-    Returns a list of page result dicts (same shape as extract_page_data).
     After extraction, runs postprocessing to:
       1. Merge continuation rows (page-spanning rows with empty pooling_station)
       2. Recompute all derived fields with improved COD + effective_date logic
@@ -436,8 +436,6 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
 
     all_pages: list[dict] = []
 
-    # Use pdfplumber for text extraction and page iteration;
-    # camelot is used for table extraction on pages that pass the gate.
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
         limit = total if max_pages == -1 else min(max_pages, total)
@@ -445,35 +443,15 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
         print(f"  [JCC] {total} pages ({label}) — scanning for target tables …")
 
         for i in range(limit):
-            page = pdf.pages[i]
             page_number = i + 1
-            text = page.extract_text() or ""
+            page_text = pdf.pages[i].extract_text() or ""
 
-            if not page_passes_gate(text):
-                continue
-
-            result = None
-            # Use camelot for table cell view (LLM context)
-            table_text = _page_table_text(pdf_path, page_number)
-            print(f"  [JCC] Page {page_number:3d} target columns found → LLM …", end="", flush=True)
-            llm_rows = llm_extract_page_rows(text, table_text, page_number, runtime)
-            if llm_rows:
-                print(f" {len(llm_rows)} rows")
-                result = {
-                    "page_number": page_number,
-                    "raw_text": text,
-                    "rows": llm_rows,
-                    "extraction_method": "llm",
-                }
-            else:
-                print(" fallback table (camelot)")
-                result = extract_page_data(pdf_path, page_number, page_text=text)
-                if result is not None:
-                    result["extraction_method"] = "camelot_table"
-
+            # Camelot-only: extract tables → check columns → extract rows
+            result = extract_page_data(pdf_path, page_number, page_text=page_text)
             if result is None:
                 continue
 
+            result["extraction_method"] = "camelot_table"
             row_count = len(result["rows"])
             print(f"  ✓ Page {page_number:3d} → {row_count} data rows")
             all_pages.append(result)
