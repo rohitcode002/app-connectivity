@@ -37,6 +37,7 @@ from pipeline.jcc_handler.models import EXCEL_COLUMN_NAMES
 from pipeline.jcc_handler.extraction import extract_jcc_pdf
 
 logger = logging.getLogger(__name__)
+_STEP_LOGGER_NAME = "pipeline.jcc_handler"
 
 # ─── Default I/O paths ────────────────────────────────────────────────────────
 _START_DIR = Path(__file__).resolve().parent.parent.parent   # …/start/
@@ -77,6 +78,29 @@ def _save_json(data: dict, path: Path) -> None:
 def _load_json(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
+
+
+def _configure_jcc_step_logging(out_dir: Path) -> Path:
+    """Write a persistent step-by-step JCC extraction log beside JSON cache."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / "jcc_extraction_steps.log"
+    step_logger = logging.getLogger(_STEP_LOGGER_NAME)
+    step_logger.setLevel(logging.INFO)
+
+    existing = [
+        handler for handler in step_logger.handlers
+        if isinstance(handler, logging.FileHandler)
+        and Path(getattr(handler, "baseFilename", "")).resolve() == log_path.resolve()
+    ]
+    if not existing:
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        step_logger.addHandler(handler)
+    return log_path
 
 
 # Increment this version when postprocessing logic changes materially.
@@ -255,6 +279,13 @@ def run_jcc_extraction(
     print(f"  Output dir  : {out}")
     print(f"  Excel output: {xlsx}")
 
+    step_log_path = _configure_jcc_step_logging(out)
+    logger.info(
+        "[JCC STEP] run_start source_dir=%s output_dir=%s excel=%s max_pages=%s mode=%s",
+        src, out, xlsx, max_pages if max_pages != -1 else "ALL", runtime.execution_target,
+    )
+    print(f"  Step log    : {step_log_path}")
+
     # Recursive scan for PDFs — only inside "Minutes" folders
     pdf_files = sorted(
         p for p in src.rglob("*.pdf")
@@ -286,12 +317,15 @@ def run_jcc_extraction(
             cached = _load_json(cache)
             if _has_current_jcc_schema(cached):
                 print(f"\n  [{idx}/{len(pdf_files)}] SKIP    {pdf_path.name}")
+                logger.info("[JCC STEP] cache_loaded pdf=%s json=%s", pdf_path.name, cache)
                 all_results.append(cached)
                 # Still append to Excel (upsert) so Excel stays in sync
+                logger.info("[JCC STEP] excel_dump_start pdf=%s source_json=%s excel=%s", pdf_path.name, cache, xlsx)
                 _append_pdf_to_excel(
                     cached, xlsx, started_at, datetime.now(),
                     perf_counter() - t0, _agg_stats(all_results),
                 )
+                logger.info("[JCC STEP] excel_dump_done pdf=%s excel=%s", pdf_path.name, xlsx)
                 print(f"  → Excel appended/verified: {xlsx.name}")
                 continue
             print(f"\n  [{idx}/{len(pdf_files)}] REFRESH {pdf_path.name} (stale JCC schema)")
@@ -301,6 +335,7 @@ def run_jcc_extraction(
         print("-" * 48)
 
         try:
+            logger.info("[JCC STEP] pdf_extraction_start pdf=%s path=%s", pdf_path.name, pdf_path)
             pages = extract_jcc_pdf(str(pdf_path), runtime=runtime, max_pages=max_pages)
         except Exception as exc:
             logger.error("[JCC] Failed %s: %s", pdf_path.name, exc)
@@ -316,14 +351,20 @@ def run_jcc_extraction(
 
         _save_json(result, cache)
         total_rows = sum(len(p.get("rows", [])) for p in pages)
+        logger.info(
+            "[JCC STEP] json_saved pdf=%s json=%s matched_pages=%d rows=%d",
+            pdf_path.name, cache, len(pages), total_rows,
+        )
         print(f"  → {len(pages)} pages, {total_rows} rows saved → {cache.name}")
         all_results.append(result)
 
         # Immediately append this PDF's rows to Excel
+        logger.info("[JCC STEP] excel_dump_start pdf=%s source_json=%s excel=%s", pdf_path.name, cache, xlsx)
         _append_pdf_to_excel(
             result, xlsx, started_at, datetime.now(),
             perf_counter() - t0, _agg_stats(all_results),
         )
+        logger.info("[JCC STEP] excel_dump_done pdf=%s rows=%d excel=%s", pdf_path.name, total_rows, xlsx)
         print(f"  → Excel appended: {xlsx.name}")
 
     # Final aggregate stats
@@ -336,6 +377,10 @@ def run_jcc_extraction(
     print(f"    Total data rows : {stats['total_data_rows']}")
     print("=" * 64)
     print(f"\n[JCC] Excel → {xlsx}")
+    logger.info(
+        "[JCC STEP] run_complete pdfs=%d pages_matched=%d rows=%d excel=%s",
+        stats["pdfs_processed"], stats["pages_matched"], stats["total_data_rows"], xlsx,
+    )
 
     flat_rows = _flatten(all_results)
     if not flat_rows:

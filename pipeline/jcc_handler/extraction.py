@@ -11,6 +11,7 @@ or data rows are parsed.
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from datetime import date, datetime
@@ -32,6 +33,8 @@ from pipeline.jcc_handler.models import (
     COLUMN_NAMES,
 )
 from pipeline.shared_utils import parse_json
+
+logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """You extract rows from JCC meeting PDF table pages.
@@ -403,6 +406,7 @@ def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, run
     """Extract target rows from a page using the configured LLM runtime."""
     global _llm_warned
     if runtime is None or (not getattr(runtime, "vm_mode", False) and not getattr(runtime, "api_key", "")):
+        logger.info("      [page %d] LLM skipped — no runtime configured", page_number)
         return []
 
     try:
@@ -410,6 +414,7 @@ def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, run
     except Exception as exc:
         if not _llm_warned:
             print(f"      [JCC LLM unavailable] {exc} — using regex fallback")
+            logger.warning("[page %d] LLM unavailable: %s", page_number, exc)
             _llm_warned = True
         return []
 
@@ -429,6 +434,12 @@ def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, run
         "max_tokens": 5000,
     }
 
+    print(f"      [page {page_number}] Sending to LLM for column extraction …")
+    logger.info(
+        "[page %d] [JCC STEP] llm_to_columns_start target_columns=%s",
+        page_number, COLUMN_NAMES,
+    )
+
     for attempt in range(3):
         try:
             resp = call_llm(
@@ -439,12 +450,26 @@ def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, run
                 script_path=runtime.llm_script_path,
             )
             content = extract_text_from_response(resp)
-            return _rows_from_llm_result(parse_json(content))
+            rows = _rows_from_llm_result(parse_json(content))
+            if rows:
+                cols_found = list(rows[0].keys())
+                print(f"      [page {page_number}] LLM extracted {len(rows)} rows → columns: {cols_found}")
+                logger.info(
+                    "[page %d] [JCC STEP] llm_to_columns_done rows=%d columns=%s",
+                    page_number, len(rows), cols_found,
+                )
+            else:
+                print(f"      [page {page_number}] LLM returned 0 rows")
+                logger.info("[page %d] [JCC STEP] llm_to_columns_done rows=0", page_number)
+            return rows
         except Exception as exc:
             if attempt < 2:
+                print(f"      [page {page_number}] LLM attempt {attempt+1} failed, retrying …")
+                logger.warning("[page %d] [JCC STEP] llm_to_columns_retry attempt=%d error=%s", page_number, attempt+1, exc)
                 time.sleep(5)
             else:
                 print(f"      [JCC LLM failed] {exc}")
+                logger.error("[page %d] [JCC STEP] llm_to_columns_failed attempts=3 error=%s", page_number, exc)
     return []
 
 
@@ -564,17 +589,35 @@ def extract_page_data(
     When *continuation* is True, we accept tables even without a header
     row, using the column mapping from the previous page.
     """
+    pdf_name = Path(pdf_path).name if pdf_path else ""
+    logger.info(
+        "[%s] [page %d] [JCC STEP] pdf_page_parse_start",
+        pdf_name or "unknown_pdf", page_number,
+    )
+
     # Primary: pdfplumber
     all_tables = _pdfplumber_tables(page)
 
     # Fallback: camelot (only if pdfplumber found nothing)
     extraction_method = "pdfplumber"
     if not all_tables and pdf_path:
+        print(f"      [page {page_number}] pdfplumber found 0 tables, trying camelot …")
+        logger.info("[page %d] pdfplumber found 0 tables — trying camelot", page_number)
         all_tables = _camelot_tables_fallback(pdf_path, page_number)
         if all_tables:
             extraction_method = "camelot_fallback"
+            print(f"      [page {page_number}] camelot found {len(all_tables)} table(s)")
+            logger.info("[page %d] camelot fallback found %d table(s)", page_number, len(all_tables))
+    else:
+        logger.info("[page %d] pdfplumber found %d table(s)", page_number, len(all_tables))
+
+    logger.info(
+        "[%s] [page %d] [JCC STEP] pdf_page_parse_done method=%s tables=%d",
+        pdf_name or "unknown_pdf", page_number, extraction_method, len(all_tables),
+    )
 
     if not all_tables:
+        logger.info("[%s] [page %d] [JCC STEP] page_skipped reason=no_tables", pdf_name or "unknown_pdf", page_number)
         return None, prev_col_map
 
     target = None
@@ -599,10 +642,13 @@ def extract_page_data(
             is_header_page = False
 
     if target is None:
+        logger.info("[%s] [page %d] [JCC STEP] page_skipped reason=no_target_table", pdf_name or "unknown_pdf", page_number)
         return None, prev_col_map if continuation else None
 
     # Detect column mapping from header, or reuse from previous page
     col_map = _detect_column_mapping(target) if is_header_page else prev_col_map
+    if col_map:
+        logger.info("[page %d] column mapping: %s", page_number, col_map)
 
     # ── Try LLM extraction first (if runtime is configured) ──────────────
     rows = []
@@ -618,6 +664,8 @@ def extract_page_data(
 
     # ── Fallback: regex-based column mapping ─────────────────────────────
     if not rows:
+        print(f"      [page {page_number}] Using regex column mapping (LLM {'not configured' if runtime is None else 'returned 0 rows'})")
+        logger.info("[page %d] regex fallback extraction", page_number)
         header_count = _count_header_rows(target) if is_header_page else 0
         data_rows = target[header_count:]
 
@@ -631,6 +679,11 @@ def extract_page_data(
 
         if rows:
             extraction_method = f"{extraction_method}+regex"
+            print(f"      [page {page_number}] regex extracted {len(rows)} rows")
+            logger.info(
+                "[%s] [page %d] [JCC STEP] regex_to_columns_done rows=%d columns=%s",
+                pdf_name or "unknown_pdf", page_number, len(rows), COLUMN_NAMES,
+            )
 
     result = {
         "page_number": page_number,
@@ -638,6 +691,10 @@ def extract_page_data(
         "rows":        rows,
         "extraction_method": extraction_method,
     }
+    logger.info(
+        "[%s] [page %d] [JCC STEP] page_extraction_done rows=%d method=%s",
+        pdf_name or "unknown_pdf", page_number, len(rows), extraction_method,
+    )
     return result, col_map
 
 
@@ -672,11 +729,18 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
         limit = total if max_pages == -1 else min(max_pages, total)
         label = "all" if max_pages == -1 else f"first {limit} of"
         print(f"  [JCC] {total} pages ({label}) — scanning for target tables …")
+        logger.info("[%s] opened — %d pages, scanning %s", Path(pdf_path).name, total, label)
 
         for i in range(limit):
             page_number = i + 1
             plumber_page = pdf.pages[i]
             page_text = plumber_page.extract_text() or ""
+
+            print(f"    [page {page_number}/{limit}] Parsing page …")
+            logger.info(
+                "[%s] [JCC STEP] parsing_page_from_pdf page=%d/%d",
+                Path(pdf_path).name, page_number, limit,
+            )
 
             # Decide whether to try continuation extraction
             is_continuation = in_table_region and consecutive_misses < _MAX_CONTINUATION_GAP
@@ -695,12 +759,16 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
                 method = result.get("extraction_method", "pdfplumber")
                 tag = "cont" if is_continuation and not col_map else "hdr"
                 print(f"  ✓ Page {page_number:3d} → {row_count} data rows [{tag}] ({method})")
+                logger.info("[%s] [JCC STEP] page_matched page=%d rows=%d tag=%s method=%s",
+                            Path(pdf_path).name, page_number, row_count, tag, method)
                 all_pages.append(result)
                 in_table_region = True
                 consecutive_misses = 0
                 if col_map:
                     active_col_map = col_map
             else:
+                print(f"    [page {page_number}/{limit}] No target table found — skipped")
+                logger.debug("[%s] page %d — no target table", Path(pdf_path).name, page_number)
                 if in_table_region:
                     consecutive_misses += 1
                     if consecutive_misses >= _MAX_CONTINUATION_GAP:
@@ -711,6 +779,8 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
 
     # ── Postprocessing: merge continuations + recompute COD/effective_date ──
     if all_pages:
+        logger.info("[%s] postprocessing %d matched pages", Path(pdf_path).name, len(all_pages))
         postprocess_all_pages(all_pages, runtime=runtime)
 
+    logger.info("[%s] extraction complete — %d pages with data", Path(pdf_path).name, len(all_pages))
     return all_pages
