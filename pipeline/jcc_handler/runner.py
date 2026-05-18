@@ -2,11 +2,12 @@
 jcc_handler/runner.py — JCC Orchestration (Module 4)
 ======================================================
 Discovers all JCC Meeting PDFs in the source folder (recursive scan),
-checks JSON cache, extracts un-cached PDFs, writes per-PDF and combined
-JSON + Excel output.
+checks JSON cache, extracts un-cached PDFs, writes per-PDF JSON cache
+and **incrementally appends** rows to the Excel workbook after each PDF.
 
-After extraction, runs the **JCC Output Layer** which cross-references
-with effectiveness data to compute GNA / TGNA values.
+Extraction is the ONLY responsibility of ``run_jcc_extraction()``.
+Mapping layers (JCC Output Layer, Layer 4) live in ``run_jcc_mapping()``
+and are called separately by the full pipeline orchestrator.
 
 This is the only file that performs I/O orchestration for Module 4.
 Edit extraction.py to change how tables are detected or parsed.
@@ -18,17 +19,22 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Optional
 
 import pandas as pd
 
 from config import RuntimeConfig, load_runtime_config
-from pipeline.excel_utils import export_to_excel
+from pipeline.excel_utils import (
+    _apply_data_style,
+    _apply_header_style,
+    _autosize_columns,
+    _get_openpyxl,
+)
 from pipeline.jcc_handler.models import EXCEL_COLUMN_NAMES
 from pipeline.jcc_handler.extraction import extract_jcc_pdf
-from pipeline.jcc_handler.jcc_output_layer import run_jcc_output_layer, run_layer4_excel
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +56,10 @@ def _default_source_dir() -> Path:
 
 JCC_SOURCE_DIR  : Path = _default_source_dir()
 JCC_OUTPUT_DIR  : Path = _START_DIR / "output" / "jcc_cache"
-JCC_EXCEL       : Path = _START_DIR / "excels" / "jcc_extracted.xlsx"
+JCC_EXCEL       : Path = _START_DIR / "excels" / "04_jcc_extracted.xlsx"
+
+# Full column order for the Excel workbook
+_JCC_EXCEL_COLUMNS = ["source_pdf", "page_number"] + EXCEL_COLUMN_NAMES
 
 
 # ─── Cache helpers ────────────────────────────────────────────────────────────
@@ -72,7 +81,7 @@ def _load_json(path: Path) -> dict:
 
 # Increment this version when postprocessing logic changes materially.
 # Stale caches without a matching version will be re-extracted.
-_POSTPROCESS_VERSION = 2
+_POSTPROCESS_VERSION = 3
 
 
 def _has_current_jcc_schema(data: dict) -> bool:
@@ -104,7 +113,109 @@ def _flatten(all_results: list[dict]) -> list[dict]:
     return flat
 
 
-# ─── Public API ───────────────────────────────────────────────────────────────
+def _agg_stats(all_results: list[dict]) -> dict:
+    """Compute aggregate stats from all processed PDFs."""
+    flat = _flatten(all_results)
+    return {
+        "pdfs_processed":  len(all_results),
+        "pages_matched":   sum(r.get("total_matching_pages", 0) for r in all_results),
+        "total_data_rows": len(flat),
+    }
+
+
+# ─── Incremental Excel helpers (same pattern as CMETS) ───────────────────────
+
+def _ensure_excel_workbook(xlsx: Path) -> Path:
+    """Create the JCC workbook with headers if it does not already exist."""
+    if xlsx.exists():
+        return xlsx.resolve()
+
+    opx = _get_openpyxl()
+    wb = opx.Workbook()
+    ws = wb.active
+    ws.title = "JCC Extracted Data"
+    ws.append(_JCC_EXCEL_COLUMNS)
+    ws.freeze_panes = "A2"
+    _apply_header_style(ws, opx)
+    _autosize_columns(ws)
+
+    xlsx.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(xlsx)
+    return xlsx
+
+
+def _remove_existing_pdf_rows(ws, source_pdf: str) -> int:
+    """Delete stale rows for this PDF name before appending current rows."""
+    if ws.max_row < 2:
+        return 0
+
+    headers = [cell.value for cell in ws[1]]
+    if "source_pdf" not in headers:
+        return 0
+
+    pdf_col = headers.index("source_pdf") + 1
+    target_name = Path(source_pdf).name
+    removed = 0
+    for row_idx in range(ws.max_row, 1, -1):
+        value = ws.cell(row=row_idx, column=pdf_col).value
+        if value and Path(str(value)).name == target_name:
+            ws.delete_rows(row_idx, 1)
+            removed += 1
+    return removed
+
+
+def _append_pdf_to_excel(
+    data: dict,
+    xlsx: Path,
+    started_at: datetime,
+    updated_at: datetime,
+    runtime_s: float,
+    stats: dict,
+) -> Path:
+    """Append one PDF's flattened rows into the existing JCC workbook."""
+    opx = _get_openpyxl()
+    if not xlsx.exists():
+        _ensure_excel_workbook(xlsx)
+
+    wb = opx.load_workbook(xlsx)
+    ws = wb["JCC Extracted Data"] if "JCC Extracted Data" in wb.sheetnames else wb.active
+    if ws.max_row == 0:
+        ws.append(_JCC_EXCEL_COLUMNS)
+        _apply_header_style(ws, opx)
+
+    # Remove stale rows for this PDF, then append fresh ones
+    _remove_existing_pdf_rows(ws, data.get("source", ""))
+
+    for record in _flatten([data]):
+        ws.append([record.get(col) for col in _JCC_EXCEL_COLUMNS])
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    _apply_header_style(ws, opx)
+    _apply_data_style(ws, opx)
+    _autosize_columns(ws)
+
+    # Update Run Summary sheet
+    if "Run Summary" in wb.sheetnames:
+        del wb["Run Summary"]
+    ws_summary = wb.create_sheet("Run Summary")
+    for row in [
+        ("Run started at",           started_at.isoformat(timespec="seconds")),
+        ("Last updated at",          updated_at.isoformat(timespec="seconds")),
+        ("Runtime so far (seconds)", round(runtime_s, 2)),
+        ("Last appended PDF",        Path(data.get("source", "")).name),
+        ("PDFs processed",           stats["pdfs_processed"]),
+        ("Pages matched",            stats["pages_matched"]),
+        ("Total data rows",          stats["total_data_rows"]),
+    ]:
+        ws_summary.append(list(row))
+    _autosize_columns(ws_summary)
+
+    wb.save(xlsx)
+    return xlsx
+
+
+# ─── Public API: Extraction only ─────────────────────────────────────────────
 
 def run_jcc_extraction(
     source_dir:  Path | str | None = None,
@@ -112,44 +223,17 @@ def run_jcc_extraction(
     excel_path:  Path | str | None = None,
     runtime:     Optional[RuntimeConfig] = None,
     max_pages:   int = -1,
-    *,
-    effectiveness_df: pd.DataFrame | None = None,
-    effectiveness_excel_path: Path | str | None = None,
-    effectiveness_output_dir: Path | str | None = None,
-    jcc_output_excel_path: Path | str | None = None,
-    jcc_mapped_excel_path: Path | str | None = None,
-    mapped_excel_path: Path | str | None = None,
-    mapped_df: pd.DataFrame | None = None,
-    layer4_excel_path: Path | str | None = None,
-    cmets_excel_path: Path | str | None = None,
 ) -> pd.DataFrame:
-    """Discover JCC Meeting PDFs → extract (skip cached) → dump JSON → write Excel.
+    """Discover JCC Meeting PDFs → extract → save JSON → append Excel.
 
-    After extraction, runs the JCC Output Layer to cross-reference with
-    effectiveness data and compute GNA / TGNA values.
+    This function is ONLY responsible for extraction. It does NOT run
+    any mapping layers (JCC Output Layer, Layer 4). Use
+    ``run_jcc_mapping()`` for that — called separately by the full
+    pipeline orchestrator.
 
-    Then runs Layer 4 (CMETS-first JCC mapping) which searches for
-    CMETS application IDs (GNA → LTA → 5.2) in the JCC
-    connectivity_applicant column and computes GNA / TGNA.
-
-    Parameters
-    ----------
-    effectiveness_df : DataFrame, optional
-        Pre-loaded effectiveness data (from Module 2).
-    effectiveness_excel_path : Path, optional
-        Path to effectiveness_combined.xlsx (fallback).
-    effectiveness_output_dir : Path, optional
-        Folder with effectiveness JSON caches (fallback).
-    jcc_output_excel_path : Path, optional
-        Output path for the 4-column JCC Output Excel.
-    mapped_excel_path : Path, optional
-        Path to effectiveness_mapped.xlsx (Module 3 output) — legacy.
-    mapped_df : DataFrame, optional
-        Pre-loaded Module 3 mapped DataFrame — legacy.
-    layer4_excel_path : Path, optional
-        Output path for the CMETS-JCC mapped Excel (all CMETS + GNA/TGNA).
-    cmets_excel_path : Path, optional
-        Path to cmets_extracted.xlsx (Module 1 output) for Layer 4.
+    Excel is updated **incrementally after each PDF** — rows are appended
+    as soon as a PDF is extracted (or loaded from cache), so partial
+    results are available even if the run is interrupted.
 
     Returns pd.DataFrame with all extracted JCC rows.
     """
@@ -190,7 +274,10 @@ def run_jcc_extraction(
     print(f"  Max pages   : {max_pages if max_pages != -1 else 'ALL'}")
     print("=" * 64)
 
+    started_at = datetime.now()
+    t0         = perf_counter()
     all_results: list[dict] = []
+    _ensure_excel_workbook(xlsx)
 
     for idx, pdf_path in enumerate(pdf_files, 1):
         cache = _cache_path(pdf_path.name, out)
@@ -200,6 +287,12 @@ def run_jcc_extraction(
             if _has_current_jcc_schema(cached):
                 print(f"\n  [{idx}/{len(pdf_files)}] SKIP    {pdf_path.name}")
                 all_results.append(cached)
+                # Still append to Excel (upsert) so Excel stays in sync
+                _append_pdf_to_excel(
+                    cached, xlsx, started_at, datetime.now(),
+                    perf_counter() - t0, _agg_stats(all_results),
+                )
+                print(f"  → Excel appended/verified: {xlsx.name}")
                 continue
             print(f"\n  [{idx}/{len(pdf_files)}] REFRESH {pdf_path.name} (stale JCC schema)")
         else:
@@ -226,38 +319,70 @@ def run_jcc_extraction(
         print(f"  → {len(pages)} pages, {total_rows} rows saved → {cache.name}")
         all_results.append(result)
 
-    # Aggregate stats
-    total_pdfs   = len(all_results)
-    total_pages  = sum(r.get("total_matching_pages", 0) for r in all_results)
-    flat_rows    = _flatten(all_results)
-    total_rows   = len(flat_rows)
+        # Immediately append this PDF's rows to Excel
+        _append_pdf_to_excel(
+            result, xlsx, started_at, datetime.now(),
+            perf_counter() - t0, _agg_stats(all_results),
+        )
+        print(f"  → Excel appended: {xlsx.name}")
+
+    # Final aggregate stats
+    stats = _agg_stats(all_results)
 
     print("\n" + "=" * 64)
     print("  JCC SUMMARY")
-    print(f"    PDFs processed  : {total_pdfs}")
-    print(f"    Pages matched   : {total_pages}")
-    print(f"    Total data rows : {total_rows}")
+    print(f"    PDFs processed  : {stats['pdfs_processed']}")
+    print(f"    Pages matched   : {stats['pages_matched']}")
+    print(f"    Total data rows : {stats['total_data_rows']}")
     print("=" * 64)
+    print(f"\n[JCC] Excel → {xlsx}")
 
+    flat_rows = _flatten(all_results)
     if not flat_rows:
         return pd.DataFrame()
 
-    df = pd.DataFrame(flat_rows)
+    return pd.DataFrame(flat_rows)
 
-    # Excel column order
-    col_order = ["source_pdf", "page_number"] + [c for c in EXCEL_COLUMN_NAMES if c in df.columns]
-    export_to_excel(
-        rows         = flat_rows,
-        output_path  = xlsx,
-        sheet_name   = "JCC Extracted Data",
-        column_order = col_order,
-        summary_rows = [
-            ("PDFs processed",  total_pdfs),
-            ("Pages matched",   total_pages),
-            ("Total data rows", total_rows),
-        ],
-    )
-    print(f"\n[JCC] Excel → {xlsx}")
+
+# ─── Public API: Mapping layers (called by full pipeline only) ────────────────
+
+def run_jcc_mapping(
+    *,
+    jcc_excel_path: Path | str | None = None,
+    effectiveness_df: pd.DataFrame | None = None,
+    effectiveness_excel_path: Path | str | None = None,
+    effectiveness_output_dir: Path | str | None = None,
+    jcc_output_excel_path: Path | str | None = None,
+    jcc_mapped_excel_path: Path | str | None = None,
+    mapped_excel_path: Path | str | None = None,
+    mapped_df: pd.DataFrame | None = None,
+    layer4_excel_path: Path | str | None = None,
+    cmets_excel_path: Path | str | None = None,
+    jcc_cache_dir: Path | str | None = None,
+) -> None:
+    """Run JCC mapping layers (Output Layer + Layer 4).
+
+    This is separate from extraction and should only be called by the
+    full pipeline orchestrator (extract_main.py) after ALL source
+    extractions have completed.
+    """
+    from pipeline.jcc_handler.jcc_output_layer import run_jcc_output_layer, run_layer4_excel
+
+    # Load JCC results from cache
+    cache_dir = Path(jcc_cache_dir).resolve() if jcc_cache_dir else JCC_OUTPUT_DIR
+    all_results: list[dict] = []
+    if cache_dir.exists():
+        for json_file in sorted(cache_dir.glob("*.json")):
+            try:
+                all_results.append(_load_json(json_file))
+            except Exception:
+                continue
+
+    if not all_results:
+        print("\n[JCC Mapping] No JCC extraction results found — skipping mapping.")
+        return
+
+    print(f"\n[JCC Mapping] Loaded {len(all_results)} cached PDFs for mapping")
 
     # ── JCC Output Layer — GNA / TGNA cross-reference ─────────────────────
     try:
@@ -287,5 +412,3 @@ def run_jcc_extraction(
     except Exception as exc:
         logger.error("[JCC] Layer 4 failed: %s", exc)
         print(f"\n[JCC] ⚠ Layer 4 failed: {exc}")
-
-    return df

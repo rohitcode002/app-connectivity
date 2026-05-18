@@ -396,15 +396,21 @@ def _rows_from_llm_result(result) -> list[dict]:
     return cleaned
 
 
+_llm_warned = False
+
+
 def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, runtime) -> list[dict]:
     """Extract target rows from a page using the configured LLM runtime."""
+    global _llm_warned
     if runtime is None or (not getattr(runtime, "vm_mode", False) and not getattr(runtime, "api_key", "")):
         return []
 
     try:
         from llm_client import call_llm, extract_text_from_response
     except Exception as exc:
-        print(f"      [JCC LLM unavailable] {exc}")
+        if not _llm_warned:
+            print(f"      [JCC LLM unavailable] {exc} — using regex fallback")
+            _llm_warned = True
         return []
 
     prompt = {
@@ -541,11 +547,15 @@ def extract_page_data(
     page_text: str = "",
     continuation: bool = False,
     prev_col_map: dict[str, int] | None = None,
+    runtime=None,
 ) -> tuple[Optional[dict], dict[str, int] | None]:
     """Extract the connectivity table from a single page.
 
-    Uses pdfplumber as primary extractor (clean cell text) with
-    camelot as fallback when pdfplumber finds no tables.
+    Flow:
+      1. pdfplumber extracts table structure (primary), camelot as fallback
+      2. Gate check: is this the target connectivity table?
+      3. LLM extracts the 5 target columns from the table text (if available)
+      4. Falls back to regex-based column mapping if LLM unavailable/fails
 
     Returns a tuple of:
       - dict with page metadata and row dicts (or None if no table)
@@ -594,18 +604,33 @@ def extract_page_data(
     # Detect column mapping from header, or reuse from previous page
     col_map = _detect_column_mapping(target) if is_header_page else prev_col_map
 
-    header_count = _count_header_rows(target) if is_header_page else 0
-    data_rows = target[header_count:]
-
+    # ── Try LLM extraction first (if runtime is configured) ──────────────
     rows = []
-    for raw_row in data_rows:
-        if not any(_clean(cell) for cell in (raw_row or [])):
-            continue
-        row = _requested_columns_from_pdf_row(raw_row, col_map)
-        # Ensure all canonical columns exist
-        for col in COLUMN_NAMES:
-            row.setdefault(col, "")
-        rows.append(_add_computed_fields(row))
+    table_text = _page_table_text_from_tables([target])
+    llm_used = False
+
+    if runtime is not None:
+        llm_rows = llm_extract_page_rows(page_text, table_text, page_number, runtime)
+        if llm_rows:
+            rows = llm_rows
+            llm_used = True
+            extraction_method = f"{extraction_method}+llm"
+
+    # ── Fallback: regex-based column mapping ─────────────────────────────
+    if not rows:
+        header_count = _count_header_rows(target) if is_header_page else 0
+        data_rows = target[header_count:]
+
+        for raw_row in data_rows:
+            if not any(_clean(cell) for cell in (raw_row or [])):
+                continue
+            row = _requested_columns_from_pdf_row(raw_row, col_map)
+            for col in COLUMN_NAMES:
+                row.setdefault(col, "")
+            rows.append(_add_computed_fields(row))
+
+        if rows:
+            extraction_method = f"{extraction_method}+regex"
 
     result = {
         "page_number": page_number,
@@ -662,6 +687,7 @@ def extract_jcc_pdf(pdf_path: str, runtime=None, max_pages: int = -1) -> list[di
                 page_text=page_text,
                 continuation=is_continuation,
                 prev_col_map=active_col_map,
+                runtime=runtime,
             )
 
             if result is not None and result.get("rows"):

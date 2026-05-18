@@ -64,7 +64,7 @@ from pipeline.extraction_orchestrator import run_pending_extractions
 from pipeline.cmets_handler         import run_cmets_extraction
 from pipeline.effectiveness_handler import run_effectiveness_extraction
 from pipeline.mapping_handler       import run_mapping
-from pipeline.jcc_handler           import run_jcc_extraction
+from pipeline.jcc_handler           import run_jcc_extraction, run_jcc_mapping
 from pipeline.bayallocation_handler import run_bayallocation_extraction
 from pipeline.bay_mapping_handler   import run_bay_mapping
 from pipeline.excel_utils           import export_to_excel
@@ -383,18 +383,25 @@ def _run_extraction(runtime, tracker: PipelineTracker, args) -> None:
             output_dir               = args.jcc_output_dir,
             excel_path               = jcc_excel,
             runtime                  = runtime,
+        )
+        tracker.register_excel("jcc", jcc_excel, "Extracted Data", len(jcc_df))
+        print(f"\n[Pipeline] Module 4 extraction complete — {len(jcc_df)} rows")
+
+        # Now run JCC mapping layers (Output Layer + Layer 4)
+        print("\n[Pipeline] Module 4 — JCC mapping layers")
+        run_jcc_mapping(
+            jcc_cache_dir            = args.jcc_output_dir,
             effectiveness_df         = eff_df,
             effectiveness_excel_path = eff_excel,
             effectiveness_output_dir = args.eff_output_dir,
             jcc_output_excel_path    = str(excels_dir / "04_jcc_output_layer.xlsx"),
             jcc_mapped_excel_path    = str(excels_dir / "04_jcc_extracted_mapped.xlsx"),
-            mapped_excel_path        = str(mapped_path),
             layer4_excel_path        = layer4_excel,
             cmets_excel_path         = str(cmets_path),
+            mapped_excel_path        = str(mapped_path),
         )
-        tracker.register_excel("jcc", jcc_excel, "Extracted Data", len(jcc_df))
         tracker.register_excel("jcc_layer4", layer4_excel, "Layer 4 Mapped")
-        print(f"\n[Pipeline] Module 4 complete — {len(jcc_df)} rows\n")
+        print(f"\n[Pipeline] Module 4 mapping complete\n")
     except Exception:
         logging.error("Module 4 failed.")
         traceback.print_exc()
@@ -542,6 +549,15 @@ def main() -> None:
             only_sources=only_sources,
             regions=runtime.source_regions,
         )
+
+        # ── Phase 2: Mapping (after all extractions complete) ─────────────────
+        from pipeline.extraction_orchestrator import run_jcc_mapping_step
+        try:
+            print("\n[Pipeline] Phase 2 — Running JCC mapping layers...")
+            run_jcc_mapping_step(_START_DIR)
+        except Exception:
+            logging.error("JCC mapping step failed.")
+            traceback.print_exc()
 
         total_excels = len(list((_START_DIR / "excels").glob("*.xlsx")))
         total_extracted = sum(item.get("extracted", 0) for item in extraction_results)

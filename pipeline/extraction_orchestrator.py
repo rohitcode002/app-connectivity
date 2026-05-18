@@ -12,7 +12,7 @@ from config import RuntimeConfig
 from pipeline.downloader.pdf_cache import get_pdf_cache
 from pipeline.cmets_handler import run_cmets_extraction
 from pipeline.effectiveness_handler import run_effectiveness_extraction
-from pipeline.jcc_handler import run_jcc_extraction
+from pipeline.jcc_handler import run_jcc_extraction, run_jcc_mapping
 from pipeline.bayallocation_handler import run_bayallocation_extraction
 
 _START_DIR = Path(__file__).resolve().parent.parent
@@ -177,40 +177,39 @@ def _cache_path_for(output_dir: Path, pdf_name: str) -> Path:
 
 
 def _run_source_runner(source: ExtractionSource, runtime: RuntimeConfig, pdfs: list[PendingPdf]) -> None:
+    """Run extraction only for any source. No mapping layers."""
     tmp_ctx, temp_dir = _prepare_temp_dir(pdfs, source.flatten)
     max_pages = runtime.max_pages
     try:
-        if source.runner is run_cmets_extraction:
-            source.runner(
-                source_dir=str(temp_dir),
-                output_dir=str(source.output_dir),
-                excel_path=str(source.excel_path),
-                runtime=runtime,
-                max_pages=max_pages,
-            )
-        elif source.runner is run_jcc_extraction:
-            excel_root = source.excel_path.parent
-            source.runner(
-                source_dir=str(temp_dir),
-                output_dir=str(source.output_dir),
-                excel_path=str(source.excel_path),
-                runtime=runtime,
-                max_pages=max_pages,
-                jcc_output_excel_path=str(excel_root / "04_jcc_output_layer.xlsx"),
-                jcc_mapped_excel_path=str(excel_root / "04_jcc_extracted_mapped.xlsx"),
-                layer4_excel_path=str(excel_root / "04_cmets_jcc_mapped.xlsx"),
-                cmets_excel_path=str(excel_root / "01_cmets_extracted.xlsx"),
-            )
-        else:
-            source.runner(
-                source_dir=str(temp_dir),
-                output_dir=str(source.output_dir),
-                excel_path=str(source.excel_path),
-                runtime=runtime,
-                max_pages=max_pages,
-            )
+        source.runner(
+            source_dir=str(temp_dir),
+            output_dir=str(source.output_dir),
+            excel_path=str(source.excel_path),
+            runtime=runtime,
+            max_pages=max_pages,
+        )
     finally:
         tmp_ctx.cleanup()
+
+
+def run_jcc_mapping_step(start_dir: Path | None = None) -> None:
+    """Run JCC mapping layers after all extractions are complete.
+
+    Called separately by the full pipeline (extract_main.py) after
+    all source extractions have finished.
+    """
+    root = start_dir or _START_DIR
+    excel_root = root / "excels"
+    cache_dir = root / "output" / "jcc_cache"
+
+    run_jcc_mapping(
+        jcc_cache_dir=str(cache_dir),
+        jcc_output_excel_path=str(excel_root / "04_jcc_output_layer.xlsx"),
+        jcc_mapped_excel_path=str(excel_root / "04_jcc_extracted_mapped.xlsx"),
+        layer4_excel_path=str(excel_root / "04_cmets_jcc_mapped.xlsx"),
+        cmets_excel_path=str(excel_root / "01_cmets_extracted.xlsx"),
+        effectiveness_excel_path=str(excel_root / "02_effectiveness_extracted.xlsx"),
+    )
 
 
 def extract_pending_for_source(
