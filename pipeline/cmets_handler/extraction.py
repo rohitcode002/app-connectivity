@@ -29,6 +29,7 @@ from pipeline.cmets_handler.voltage_extractor import (
     extract_voltage_from_page,
 )
 from pipeline.shared_utils import parse_json
+from pipeline.token_usage import record_llm_token_usage
 
 
 # ── Helper: build enriched page text with camelot tables ──────────────────────
@@ -146,6 +147,8 @@ def llm_extract_rows(
     vm_mode: bool,
     api_key: Optional[str],
     llm_script_path: Optional[str],
+    pdf_name: str = "",
+    page_number: int | None = None,
 ) -> list[dict]:
     """Send a single page to the LLM and return raw row dicts."""
     prompt = {
@@ -162,6 +165,18 @@ def llm_extract_rows(
     try:
         resp    = call_llm(prompt, vm=vm_mode, api_key=api_key, model=MODEL, script_path=llm_script_path)
         content = extract_text_from_response(resp)
+        totals = record_llm_token_usage(
+            "cmets",
+            prompt,
+            resp,
+            content,
+            pdf_name=pdf_name,
+            page_number=page_number,
+            purpose="page_row_extraction",
+            model=MODEL,
+        )
+        total_display = totals["total_tokens"] + totals["estimated_total_tokens"]
+        print(f" tokens_total={total_display}", end="", flush=True)
         result  = parse_json(content)
         rows    = result.get("rows", []) if isinstance(result, dict) else []
         return rows if isinstance(rows, list) else []
@@ -202,7 +217,15 @@ def run_single_pdf(
 
         # Sub-layer C: LLM extraction
         print(f"  [C] Page {pnum} ({len(text)} chars) → LLM …", end="", flush=True)
-        raw_rows   = llm_extract_rows(text, active_fields, vm_mode, api_key, llm_script_path)
+        raw_rows   = llm_extract_rows(
+            text,
+            active_fields,
+            vm_mode,
+            api_key,
+            llm_script_path,
+            pdf_name=pdf_path,
+            page_number=pnum,
+        )
         print(f" {len(raw_rows)} raw")
 
         raw_rows   = dedup_dicts(raw_rows)

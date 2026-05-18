@@ -35,6 +35,7 @@ from pipeline.excel_utils import (
 )
 from pipeline.jcc_handler.models import EXCEL_COLUMN_NAMES
 from pipeline.jcc_handler.extraction import extract_jcc_pdf
+from pipeline.token_usage import DEFAULT_TOKEN_USAGE_PATH, get_module_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +354,13 @@ def run_jcc_extraction(
     print(f"    PDFs processed  : {stats['pdfs_processed']}")
     print(f"    Pages matched   : {stats['pages_matched']}")
     print(f"    Total data rows : {stats['total_data_rows']}")
+    token_usage = get_module_token_usage("jcc")
+    token_total = token_usage["total_tokens"] + token_usage["estimated_total_tokens"]
+    print(
+        f"    LLM tokens      : {token_total} cumulative "
+        f"(actual {token_usage['total_tokens']}, estimated {token_usage['estimated_total_tokens']})"
+    )
+    print(f"    Token usage     : {DEFAULT_TOKEN_USAGE_PATH}")
     print("=" * 64)
     print(f"\n[JCC] Excel → {xlsx}")
     logger.info(

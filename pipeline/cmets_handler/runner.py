@@ -29,6 +29,7 @@ from pipeline.excel_utils import (
 from pipeline.cmets_handler.models import PipelineResult, CMETS_COLUMNS
 from pipeline.cmets_handler.extraction import run_single_pdf
 from pipeline.cmets_handler.meeting_classifier import classify_meeting
+from pipeline.token_usage import DEFAULT_TOKEN_USAGE_PATH, get_module_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +377,13 @@ def run_cmets_extraction(
     print(f"    Pages passed  : {stats['total_pages_passed_gate']}")
     print(f"    Total rows    : {stats['total_rows']}")
     print(f"    Runtime (s)   : {runtime_s:.1f}")
+    token_usage = get_module_token_usage("cmets")
+    token_total = token_usage["total_tokens"] + token_usage["estimated_total_tokens"]
+    print(
+        f"    LLM tokens    : {token_total} cumulative "
+        f"(actual {token_usage['total_tokens']}, estimated {token_usage['estimated_total_tokens']})"
+    )
+    print(f"    Token usage   : {DEFAULT_TOKEN_USAGE_PATH}")
     print("=" * 64)
 
     out_path = xlsx.resolve()

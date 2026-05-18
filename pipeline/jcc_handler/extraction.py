@@ -33,6 +33,7 @@ from pipeline.jcc_handler.models import (
     COLUMN_NAMES,
 )
 from pipeline.shared_utils import parse_json
+from pipeline.token_usage import record_llm_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -403,7 +404,13 @@ def _rows_from_llm_result(result) -> list[dict]:
 _llm_warned = False
 
 
-def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, runtime) -> list[dict]:
+def llm_extract_page_rows(
+    page_text: str,
+    table_text: str,
+    page_number: int,
+    runtime,
+    pdf_name: str = "",
+) -> list[dict]:
     """Extract target rows from a page using the configured LLM runtime."""
     global _llm_warned
     if runtime is None or (not getattr(runtime, "vm_mode", False) and not getattr(runtime, "api_key", "")):
@@ -452,16 +459,27 @@ def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, run
                 script_path=runtime.llm_script_path,
             )
             content = extract_text_from_response(resp)
+            totals = record_llm_token_usage(
+                "jcc",
+                prompt,
+                resp,
+                content,
+                pdf_name=pdf_name,
+                page_number=page_number,
+                purpose="page_column_extraction",
+                model=MODEL,
+            )
+            total_display = totals["total_tokens"] + totals["estimated_total_tokens"]
             rows = _rows_from_llm_result(parse_json(content))
             if rows:
                 cols_found = list(rows[0].keys())
-                print(f"      [page {page_number}] LLM extracted {len(rows)} rows → columns: {cols_found}")
+                print(f"      [page {page_number}] LLM extracted {len(rows)} rows → columns: {cols_found} (tokens total: {total_display})")
                 logger.info(
                     "[page %d] [JCC STEP] llm_to_columns_done rows=%d columns=%s",
                     page_number, len(rows), cols_found,
                 )
             else:
-                print(f"      [page {page_number}] LLM returned 0 rows")
+                print(f"      [page {page_number}] LLM returned 0 rows (tokens total: {total_display})")
                 logger.info("[page %d] [JCC STEP] llm_to_columns_done rows=0", page_number)
             return rows
         except Exception as exc:
@@ -618,7 +636,13 @@ def extract_page_data(
     llm_used = False
 
     if runtime is not None:
-        llm_rows = llm_extract_page_rows(page_text, table_text, page_number, runtime)
+        llm_rows = llm_extract_page_rows(
+            page_text,
+            table_text,
+            page_number,
+            runtime,
+            pdf_name=pdf_name,
+        )
         if llm_rows:
             rows = llm_rows
             llm_used = True

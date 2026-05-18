@@ -13,6 +13,7 @@ from typing import Optional
 from config import MODEL, load_runtime_config
 from llm_client import call_llm, extract_text_from_response
 from pipeline.shared_utils import parse_json
+from pipeline.token_usage import record_llm_token_usage
 
 # ── Prompt Templates ─────────────────────────────────────────────────────────
 
@@ -92,6 +93,16 @@ def extract_battery_values(
             script_path=_RUNTIME_CONFIG.llm_script_path
         )
         content = extract_text_from_response(resp)
+        totals = record_llm_token_usage(
+            "cmets",
+            prompt_payload,
+            resp,
+            content,
+            purpose="battery_value_extraction",
+            model=MODEL,
+        )
+        total_display = totals["total_tokens"] + totals["estimated_total_tokens"]
+        print(f"      [Battery Extractor] token total so far: {total_display}")
         result = parse_json(content)
 
         if "mwh" in result and result["mwh"] is not None:
