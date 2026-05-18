@@ -44,7 +44,12 @@ Pages that fail are skipped.
 
 - pdfplumber extracts all tables on the page
 - The system checks if any table header row matches at least **3 target column fragments** (e.g. "pooling station", "connectivity quantum", "schedule")
-- Matching table → data rows are positionally mapped to column names
+- Matching table → the page is sent to the LLM for raw column extraction
+- Regex/keyword checks are used only for table detection and derived COD/date parsing, not for raw row extraction
+
+#### Step 5 — Page-wise Console Output
+
+For every page, the console prints whether the page was parsed, skipped, extracted by LLM, or not extracted. No separate JCC step log file is generated.
 
 ### Columns Extracted
 
@@ -55,10 +60,20 @@ Pages that fail are skipped.
 | **connectivity_quantum_mw** | JCC PDF table | Applied connectivity quantum in MW |
 | **schedule_as_per_current_jcc** | JCC PDF table | Current JCC schedule — contains MW values and dates |
 | **connectivity_start_date_under_gna** | JCC PDF table | GNA status text (e.g. "Effective" or "Connectivity likely to be operationalized...") |
-| **sr_no** | JCC PDF table | Serial number |
-| **gen_comm_schedule_prev_jcc** | JCC PDF table | Previous JCC generation commissioning schedule |
-| **ists_scope** | JCC PDF table | ISTS scope details |
-| **remarks** | JCC PDF table | Remarks text |
+
+### Derived JCC Logic
+
+The LLM extracts only the five raw columns above. Post-processing then adds:
+
+| Column | Rule |
+|---|---|
+| **total_COD** | Sum all MW values under the `Generation:` section only, where the entry also has a date and a COD/CoD/Commissioned/DOCO marker |
+| **COD_Found** | `True` when at least one qualifying COD/Commissioned Generation entry is found, otherwise `False` |
+| **effective_date** | Extract the date from `Connectivity Start Date under GNA and Connectivity Effectiveness date`, for example `Connectivity effective w.e.f. 12.12.2025` → `12.12.2025` |
+| **GNA** | If `COD_Found=True` and `effective_date` is today or earlier, copy `total_COD` here |
+| **TGNA** | If `COD_Found=True` and `effective_date` is in the future, copy `total_COD` here |
+
+If `COD_Found=False`, `total_COD`, `TGNA`, and `GNA` stay blank.
 
 ---
 

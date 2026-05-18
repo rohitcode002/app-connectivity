@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from datetime import date, datetime
+from pathlib import Path
 from typing import Optional
 
 import pdfplumber
@@ -57,6 +57,7 @@ Rules:
 - Preserve application IDs inside connectivity_applicant.
 - Preserve MW values, dates, COD/CoD/DOCO/Commissioned tags, and line breaks as readable text.
 - Extract only the raw text present in those five columns. Do not infer, summarize, or move text between columns.
+- Do not calculate total COD, COD_Found, effective_date, TGNA, or GNA.
 - Do not invent values. Use empty string for missing cells.
 - Ignore repeated header rows, footers, and page titles.
 """
@@ -395,7 +396,7 @@ def _rows_from_llm_result(result) -> list[dict]:
             continue
         normalized = {col: _get_row_value(row, col) for col in COLUMN_NAMES}
         if normalized.get("pooling_station") or normalized.get("connectivity_applicant"):
-            cleaned.append(_add_computed_fields(normalized))
+            cleaned.append(normalized)
     return cleaned
 
 
@@ -406,15 +407,16 @@ def llm_extract_page_rows(page_text: str, table_text: str, page_number: int, run
     """Extract target rows from a page using the configured LLM runtime."""
     global _llm_warned
     if runtime is None or (not getattr(runtime, "vm_mode", False) and not getattr(runtime, "api_key", "")):
-        logger.info("      [page %d] LLM skipped — no runtime configured", page_number)
+        print(f"      [page {page_number}] LLM extraction not configured — page not extracted")
+        logger.info("[page %d] [JCC STEP] llm_to_columns_skipped reason=no_runtime", page_number)
         return []
 
     try:
         from llm_client import call_llm, extract_text_from_response
     except Exception as exc:
         if not _llm_warned:
-            print(f"      [JCC LLM unavailable] {exc} — using regex fallback")
-            logger.warning("[page %d] LLM unavailable: %s", page_number, exc)
+            print(f"      [JCC LLM unavailable] {exc} — page extraction requires LLM")
+            logger.warning("[page %d] [JCC STEP] llm_to_columns_unavailable error=%s", page_number, exc)
             _llm_warned = True
         return []
 
@@ -519,50 +521,10 @@ def _calculate_total_cod(text: str) -> tuple[float | None, bool]:
     return calculate_total_cod(text, runtime=None)
 
 
-def _parse_date(value: str) -> date | None:
-    if not value:
-        return None
-    normalized = value.replace("/", ".").replace("-", ".")
-    for fmt in ("%d.%m.%Y", "%d.%m.%y"):
-        try:
-            return datetime.strptime(normalized, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
 def _extract_effective_date(text: str) -> str:
     """Extract the connectivity effective date using the improved logic."""
     from pipeline.jcc_handler.jcc_postprocess import extract_effective_date
     return extract_effective_date(text)
-
-
-def _add_computed_fields(row: dict) -> dict:
-    grantee_schedule = row.get("schedule_as_per_current_jcc", "")
-    total_cod, cod_found = _calculate_total_cod(grantee_schedule)
-    effective_date = _extract_effective_date(row.get("connectivity_start_date_under_gna", ""))
-
-    tgna = None
-    gna = None
-    if cod_found and total_cod is not None:
-        parsed_effective_date = _parse_date(effective_date)
-        if parsed_effective_date:
-            if parsed_effective_date <= date.today():
-                gna = total_cod
-            else:
-                tgna = total_cod
-
-    output = {col: row.get(col, "") for col in COLUMN_NAMES}
-    output["total_COD"] = total_cod
-    output["COD_Found"] = cod_found
-    output["effective_date"] = effective_date
-    output["TGNA"] = tgna
-    output["GNA"] = gna
-    row["substation"] = row.get("pooling_station", "")
-    row["gna_lta_id"] = _extract_gna_lta_ids(row.get("connectivity_applicant", ""))
-    output["substation"] = row["substation"]
-    output["gna_lta_id"] = row["gna_lta_id"]
-    return output
 
 
 def extract_page_data(
@@ -650,7 +612,7 @@ def extract_page_data(
     if col_map:
         logger.info("[page %d] column mapping: %s", page_number, col_map)
 
-    # ── Try LLM extraction first (if runtime is configured) ──────────────
+    # ── Raw row extraction is LLM-only ───────────────────────────────────
     rows = []
     table_text = _page_table_text_from_tables([target])
     llm_used = False
@@ -662,28 +624,13 @@ def extract_page_data(
             llm_used = True
             extraction_method = f"{extraction_method}+llm"
 
-    # ── Fallback: regex-based column mapping ─────────────────────────────
     if not rows:
-        print(f"      [page {page_number}] Using regex column mapping (LLM {'not configured' if runtime is None else 'returned 0 rows'})")
-        logger.info("[page %d] regex fallback extraction", page_number)
-        header_count = _count_header_rows(target) if is_header_page else 0
-        data_rows = target[header_count:]
-
-        for raw_row in data_rows:
-            if not any(_clean(cell) for cell in (raw_row or [])):
-                continue
-            row = _requested_columns_from_pdf_row(raw_row, col_map)
-            for col in COLUMN_NAMES:
-                row.setdefault(col, "")
-            rows.append(_add_computed_fields(row))
-
-        if rows:
-            extraction_method = f"{extraction_method}+regex"
-            print(f"      [page {page_number}] regex extracted {len(rows)} rows")
-            logger.info(
-                "[%s] [page %d] [JCC STEP] regex_to_columns_done rows=%d columns=%s",
-                pdf_name or "unknown_pdf", page_number, len(rows), COLUMN_NAMES,
-            )
+        reason = "LLM not configured" if runtime is None else "LLM returned 0 rows or failed"
+        print(f"      [page {page_number}] Extraction not done — {reason}")
+        logger.info(
+            "[%s] [page %d] [JCC STEP] page_extraction_not_done reason=%s",
+            pdf_name or "unknown_pdf", page_number, reason,
+        )
 
     result = {
         "page_number": page_number,

@@ -37,7 +37,6 @@ from pipeline.jcc_handler.models import EXCEL_COLUMN_NAMES
 from pipeline.jcc_handler.extraction import extract_jcc_pdf
 
 logger = logging.getLogger(__name__)
-_STEP_LOGGER_NAME = "pipeline.jcc_handler"
 
 # ─── Default I/O paths ────────────────────────────────────────────────────────
 _START_DIR = Path(__file__).resolve().parent.parent.parent   # …/start/
@@ -80,32 +79,9 @@ def _load_json(path: Path) -> dict:
         return json.load(fh)
 
 
-def _configure_jcc_step_logging(out_dir: Path) -> Path:
-    """Write a persistent step-by-step JCC extraction log beside JSON cache."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    log_path = out_dir / "jcc_extraction_steps.log"
-    step_logger = logging.getLogger(_STEP_LOGGER_NAME)
-    step_logger.setLevel(logging.INFO)
-
-    existing = [
-        handler for handler in step_logger.handlers
-        if isinstance(handler, logging.FileHandler)
-        and Path(getattr(handler, "baseFilename", "")).resolve() == log_path.resolve()
-    ]
-    if not existing:
-        handler = logging.FileHandler(log_path, encoding="utf-8")
-        handler.setLevel(logging.INFO)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
-        step_logger.addHandler(handler)
-    return log_path
-
-
 # Increment this version when postprocessing logic changes materially.
 # Stale caches without a matching version will be re-extracted.
-_POSTPROCESS_VERSION = 3
+_POSTPROCESS_VERSION = 4
 
 
 def _has_current_jcc_schema(data: dict) -> bool:
@@ -279,12 +255,11 @@ def run_jcc_extraction(
     print(f"  Output dir  : {out}")
     print(f"  Excel output: {xlsx}")
 
-    step_log_path = _configure_jcc_step_logging(out)
     logger.info(
         "[JCC STEP] run_start source_dir=%s output_dir=%s excel=%s max_pages=%s mode=%s",
         src, out, xlsx, max_pages if max_pages != -1 else "ALL", runtime.execution_target,
     )
-    print(f"  Step log    : {step_log_path}")
+    print("  Step output : console only")
 
     # Recursive scan for PDFs — only inside "Minutes" folders
     pdf_files = sorted(
@@ -317,9 +292,11 @@ def run_jcc_extraction(
             cached = _load_json(cache)
             if _has_current_jcc_schema(cached):
                 print(f"\n  [{idx}/{len(pdf_files)}] SKIP    {pdf_path.name}")
+                print(f"  → JSON cache loaded: {cache.name}")
                 logger.info("[JCC STEP] cache_loaded pdf=%s json=%s", pdf_path.name, cache)
                 all_results.append(cached)
                 # Still append to Excel (upsert) so Excel stays in sync
+                print(f"  → Dumping cached JSON rows into Excel: {xlsx.name}")
                 logger.info("[JCC STEP] excel_dump_start pdf=%s source_json=%s excel=%s", pdf_path.name, cache, xlsx)
                 _append_pdf_to_excel(
                     cached, xlsx, started_at, datetime.now(),
@@ -359,6 +336,7 @@ def run_jcc_extraction(
         all_results.append(result)
 
         # Immediately append this PDF's rows to Excel
+        print(f"  → Dumping extracted JSON rows into Excel: {xlsx.name}")
         logger.info("[JCC STEP] excel_dump_start pdf=%s source_json=%s excel=%s", pdf_path.name, cache, xlsx)
         _append_pdf_to_excel(
             result, xlsx, started_at, datetime.now(),

@@ -1,12 +1,23 @@
 """
 jcc_handler/jcc_postprocess.py — Post-processing for JCC extracted data
 ========================================================================
+JCC extraction rules:
+- The PDF/LLM stage extracts only the five raw JCC table columns.
+- This postprocess stage is the only place that derives total_COD,
+  COD_Found, effective_date, TGNA, and GNA.
+- total_COD is the sum of MW values under the Generation section only.
+  A MW value counts only when the same entry includes a date and an
+  explicit COD/CoD/Commissioned/DOCO marker.
+- If COD_Found is false, TGNA and GNA stay blank.
+- If COD_Found is true and effective_date is today or earlier, total_COD
+  goes to GNA; if effective_date is in the future, total_COD goes to TGNA.
+
 Three responsibilities:
 
-1. **COD Detection (robust)**
-   First pass: multiple regex patterns that cover the different COD formats
-   found across JCC PDFs. If regex finds nothing, a second pass uses the
-   LLM to extract COD/Commissioned MW values from the schedule text
+1. **COD Detection (deterministic)**
+   Multiple regex patterns cover the different COD formats found across
+   JCC PDFs. The LLM is not used here; if no qualifying Generation entry
+   is found, COD_Found is false.
 2. **Row Continuation (page-spanning rows)**
    When a table row spans two PDF pages, the continuation row on the next
    page will have an empty ``pooling_station``. This module detects those
@@ -22,12 +33,8 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 from datetime import date, datetime
 from typing import Optional
-
-from config import MODEL
-from pipeline.shared_utils import parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +70,6 @@ _COD_PATTERN_B = re.compile(
     re.IGNORECASE,
 )
 
-# Pattern C: "<MW> MW: (COD)" or "<MW> MW: (Commissioned)" without a date
-#   e.g.  "996 MW: (COD)"
-_COD_PATTERN_C = re.compile(
-    r"([\d,]+(?:\.\d+)?)\s*MW\s*:\s*\(\s*(?:CoD|COD|Commissioned|DOCO)\s*\)",
-    re.IGNORECASE,
-)
-
 # Pattern D: "<MW> MW: <date> (CoD)" — colon-separated
 #   e.g.  "238 MW: 02.01.2025 (CoD)"
 _COD_PATTERN_D = re.compile(
@@ -79,16 +79,17 @@ _COD_PATTERN_D = re.compile(
     re.IGNORECASE,
 )
 
-# All patterns in order of specificity
-_COD_PATTERNS = [_COD_PATTERN_D, _COD_PATTERN_A, _COD_PATTERN_B, _COD_PATTERN_C]
+# All patterns in order of specificity. Every pattern requires a date and an
+# explicit COD/Commissioned marker.
+_COD_PATTERNS = [_COD_PATTERN_D, _COD_PATTERN_A, _COD_PATTERN_B]
 
 
 def _generation_block(text: str) -> str:
     """Return only the Generation section from a JCC schedule cell.
 
     Stops at 'Dedicated system', 'DTL:', or 'Generation Pooling Station'.
-    If no Generation header is found, returns the full text to allow
-    patterns to still match on the whole cell content.
+    If no Generation header is found, returns empty text because COD must
+    be calculated only from the Generation section.
     """
     if not text:
         return ""
@@ -98,7 +99,7 @@ def _generation_block(text: str) -> str:
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    return match.group(1) if match else text
+    return match.group(1) if match else ""
 
 
 def _extract_cod_mw_regex(text: str) -> list[float]:
@@ -128,116 +129,18 @@ def _extract_cod_mw_regex(text: str) -> list[float]:
             except ValueError:
                 continue
 
-    # Also scan the full text (not just generation block) as fallback
-    if not values:
-        for pattern in _COD_PATTERNS:
-            for match in pattern.finditer(text):
-                match_key = match.group(0).strip()
-                if match_key in seen_match:
-                    continue
-                seen_match.add(match_key)
-                mw_raw = match.group(1)
-                try:
-                    values.append(float(mw_raw.replace(",", "")))
-                except ValueError:
-                    continue
-
     return values
-
-
-# ── LLM fallback for COD extraction ──────────────────────────────────────────
-
-_COD_LLM_SYSTEM = """You extract COD (Commercial Operation Date) / Commissioned MW values from JCC schedule text.
-
-Return JSON with this exact shape:
-{
-  "cod_entries": [
-    {"mw": <float>, "date": "<dd.mm.yyyy or empty>", "status": "<COD|CoD|Commissioned|DOCO>"}
-  ]
-}
-
-Rules:
-- Only include entries that have been explicitly tagged as (COD), (CoD), (Commissioned), or (DOCO).
-- The MW value should be a number (e.g. 57.22, 238, 996).
-- If no COD entries are found, return {"cod_entries": []}.
-- Return ONLY valid JSON. No markdown, no explanation.
-"""
-
-
-def _extract_cod_mw_llm(schedule_text: str, runtime) -> list[float]:
-    """LLM fallback: ask the model to extract COD MW values from schedule text."""
-    if runtime is None:
-        return []
-    if not getattr(runtime, "vm_mode", False) and not getattr(runtime, "api_key", ""):
-        return []
-
-    try:
-        from llm_client import call_llm, extract_text_from_response
-    except Exception:
-        return []
-
-    prompt = {
-        "messages": [
-            {"role": "system", "content": _COD_LLM_SYSTEM},
-            {
-                "role": "user",
-                "content": (
-                    "Extract all COD/Commissioned MW entries from this schedule text:\n\n"
-                    f"{schedule_text}"
-                ),
-            },
-        ],
-        "temperature": 0,
-        "max_tokens": 2000,
-    }
-
-    for attempt in range(2):
-        try:
-            resp = call_llm(
-                prompt,
-                vm=runtime.vm_mode,
-                api_key=runtime.api_key or None,
-                model=MODEL,
-                script_path=runtime.llm_script_path,
-            )
-            content = extract_text_from_response(resp)
-            data = parse_json(content)
-            if isinstance(data, dict):
-                entries = data.get("cod_entries", [])
-                values = []
-                for entry in entries:
-                    if isinstance(entry, dict):
-                        mw = entry.get("mw")
-                        if mw is not None:
-                            try:
-                                values.append(float(mw))
-                            except (ValueError, TypeError):
-                                continue
-                return values
-        except Exception:
-            if attempt < 1:
-                time.sleep(3)
-    return []
 
 
 def calculate_total_cod(
     schedule_text: str,
     runtime=None,
 ) -> tuple[float | None, bool]:
-    """Calculate total COD from schedule text using regex first, then LLM fallback.
+    """Calculate total COD from schedule text using deterministic parsing only.
 
     Returns (total_mw, cod_found).
     """
-    # Pass 1: Regex
     values = _extract_cod_mw_regex(schedule_text)
-
-    # Pass 2: LLM fallback (only if regex found nothing)
-    if not values and runtime is not None:
-        logger.debug("[COD] Regex found nothing, trying LLM fallback …")
-        values = _extract_cod_mw_llm(schedule_text, runtime)
-        if values:
-            logger.info("[COD] LLM fallback found %d entries: %s", len(values), values)
-
     if not values:
         return None, False
     return round(sum(values), 2), True
@@ -489,8 +392,8 @@ def recompute_row_fields(row: dict, runtime=None) -> dict:
     effective_date = extract_effective_date(gna_text)
 
     # GNA / TGNA logic
-    tgna = None
-    gna = None
+    tgna = ""
+    gna = ""
     if cod_found and total_cod is not None:
         parsed_eff = _parse_date(effective_date)
         if parsed_eff:
@@ -501,7 +404,7 @@ def recompute_row_fields(row: dict, runtime=None) -> dict:
 
     # Build output row
     output = {col: row.get(col, "") for col in COLUMN_NAMES}
-    output["total_COD"] = total_cod
+    output["total_COD"] = total_cod if cod_found else ""
     output["COD_Found"] = cod_found
     output["effective_date"] = effective_date
     output["TGNA"] = tgna
