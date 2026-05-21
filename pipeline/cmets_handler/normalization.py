@@ -113,6 +113,9 @@ def _pick_gna(ids: list[str], prefer_st2: bool) -> Optional[str]:
 # ── derive_enhancement_id ────────────────────────────────────────────────────
 def derive_enhancement_id(enh, gna, lta, mode) -> Optional[str]:
     """Derive Enhancement 5.2 application ID from context fields."""
+    explicit_enh_ids = extract_ids(enh)
+    if explicit_enh_ids:
+        return _pick_gna(explicit_enh_ids, prefer_st2=True)
     if not _has_ctx(r"\b(5\.?2|regulation\s*5\.?2|enhancement|revision)\b", enh, gna, lta, mode):
         return None
     st2 = _has_ctx(r"\b(stage\s*ii|st\s*ii|gna/st\s*ii)\b", enh, gna, lta, mode)

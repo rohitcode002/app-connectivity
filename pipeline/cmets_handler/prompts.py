@@ -77,6 +77,9 @@ Use these mapping rules to determine which output key a column maps to:
                                OR any column with LTA prefix
 - Application ID under Enhancement 5.2 or revision
       <- use only when table/row context mentions Enhancement 5.2 / regulation 5.2 / revision
+      <- CRITICAL: if the page/section title contains "Applications under 5.2 received",
+         every numeric ID from the "Application No. & Date" / "Application ID" column
+         belongs here, NOT in "GNA/ST II Application ID".
 - Application Quantum (MW)(ST II) <- Installed Capacity (MW) OR Connectivity Quantum (MW)
 - Granted Quantum GNA/LTA(MW) <- Granted Quantum (MW) OR Connectivity Quantum (MW) granted
       OR Granted Connectivity Quantum. This is the quantum that was actually GRANTED,
@@ -180,6 +183,14 @@ PRIMARY KEY RULE (CRITICAL):
     • "LTA Application ID"
     • "Application ID under Enhancement 5.2 or revision"
   If a row has NONE of these three IDs, DO NOT output it.
+
+5.2 PAGE ROUTING RULE (CRITICAL):
+  If the FULL PAGE TEXT contains the heading/phrase "Applications under 5.2 received",
+  treat the whole page as a 5.2 Enhancement page. For every extracted row on that
+  page, put all numeric application numbers from "Application No. & Date" or
+  "Application ID" into "Application ID under Enhancement 5.2 or revision" and
+  leave "GNA/ST II Application ID" null. If that exact 5.2 received phrase is
+  absent, extract normal GNA/ST-II application numbers into "GNA/ST II Application ID".
 
 SKIP RULES — DO NOT extract rows if:
   • "Nature of Applicant" is "Bulk consumer" or "Drawee entity" or

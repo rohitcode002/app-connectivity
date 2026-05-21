@@ -32,6 +32,74 @@ from pipeline.shared_utils import parse_json
 from pipeline.token_usage import record_llm_token_usage
 
 
+# ── Helper: route 5.2 application-number columns ─────────────────────────────
+
+_APPLICATIONS_UNDER_52_RE = re.compile(
+    r"\bApplications?\s+under\s+5\.?\s*2\s+received\b",
+    re.IGNORECASE,
+)
+
+
+def _page_has_applications_under_52(page_text: str) -> bool:
+    """Return True for CMETS tables headed 'Applications under 5.2 received'."""
+    return bool(_APPLICATIONS_UNDER_52_RE.search(page_text or ""))
+
+
+def _extract_numeric_ids(value: object) -> list[str]:
+    """Extract application-like numeric IDs from an LLM cell value."""
+    if value is None:
+        return []
+    return re.findall(r"\b\d{6,}\b", str(value))
+
+
+def _dedup_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def route_applications_under_52_rows(raw_rows: list[dict], page_text: str) -> list[dict]:
+    """Move Application No. IDs into the 5.2 column for 5.2-received pages.
+
+    Some CMETS PDFs use the normal "Application No. & Date" table header under
+    a section titled "Applications under 5.2 received". On those pages, the
+    application number is an Enhancement 5.2/revision ID, not a GNA/ST-II ID.
+    """
+    if not _page_has_applications_under_52(page_text):
+        return raw_rows
+
+    routed: list[dict] = []
+    id_source_keys = (
+        "Application ID under Enhancement 5.2 or revision",
+        "GNA/ST II Application ID",
+        "Application No. & Date",
+        "Application No.\n& Date",
+        "Application/Submission Date",
+    )
+
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            routed.append(row)
+            continue
+
+        patched = dict(row)
+        ids: list[str] = []
+        for key in id_source_keys:
+            ids.extend(_extract_numeric_ids(patched.get(key)))
+        ids = _dedup_preserve_order(ids)
+
+        if ids:
+            patched["Application ID under Enhancement 5.2 or revision"] = ", ".join(ids)
+            patched["GNA/ST II Application ID"] = None
+
+        routed.append(patched)
+    return routed
+
+
 # ── Helper: build enriched page text with camelot tables ──────────────────────
 
 def _clean_multiline(text) -> str:
@@ -228,6 +296,7 @@ def run_single_pdf(
         )
         print(f" {len(raw_rows)} raw")
 
+        raw_rows = route_applications_under_52_rows(raw_rows, text)
         raw_rows   = dedup_dicts(raw_rows)
         validated  = validate_rows(raw_rows)
         normalized = normalize(validated)

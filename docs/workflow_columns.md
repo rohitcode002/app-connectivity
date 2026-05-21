@@ -45,16 +45,16 @@ Effectiveness PDFs
 JCC PDFs
   -> Page gate:
      Pooling + Quantum + Connectivity
-  -> Table gate:
-     applicant + quantum + schedule + GNA status columns
-  -> Extract connectivity_applicant
-  -> Extract schedule_as_per_current_jcc
-     used for GNA/TGNA MW calculation
-  -> Extract connectivity_start_date_under_gna
-     used for effective/TGNA decision
-  -> Extract schedule_current_jcc_ists_scope
-     from "Under ISTS Scope Connectivity / Transmission System"
-     may contain Bay No
+  -> Use LLM extraction for exact raw table-column text
+  -> Extract only these raw JCC columns:
+     Pooling Station
+     Connectivity Applicant
+     Connectivity Quantum (MW)
+     Under Grantee scope Gen Commissioning /Connectivity line schedule
+     Connectivity Start Date under GNA and Connectivity Effectiveness date
+  -> Compute total COD and COD_Found from the Generation section only
+  -> Extract effective_date from the connectivity effectiveness date text
+  -> If COD_Found is True, decide GNA/TGNA from effective_date versus current run date
   -> Keep JCC rows for Layer 4 matching
   -> 04_jcc_extracted.xlsx
 ```
@@ -94,11 +94,16 @@ Bay Allocation PDFs
      order: GNA/ST II Application ID -> LTA Application ID -> 5.2 ID
   -> Once JCC row is identified:
      extract Bay No from schedule_current_jcc_ists_scope if present
-  -> Check connectivity_start_date_under_gna
-     -> if effective:
-        GNA = sum all MW in schedule_as_per_current_jcc
-     -> if not effective:
-        TGNA = sum only MW tagged Commissioned in schedule_as_per_current_jcc
+  -> From matched JCC row:
+     total COD = sum MW values under Generation only when each value has a date
+                 and COD/Commissioned keyword
+     COD_Found = True when such Generation COD/Commissioned entries are found
+     effective_date = date from Connectivity Start Date under GNA and
+                      Connectivity Effectiveness date
+     if COD_Found is True and current run date is after effective_date:
+        GNA = total COD
+     if COD_Found is True and effective_date is after current run date:
+        TGNA = total COD
   -> 04_cmets_jcc_mapped.xlsx
   -> Module 6: Bay mapping
   -> Check Bay No (JCC)
@@ -134,11 +139,13 @@ Bay Allocation PDFs
 
 1. Read JCC PDFs.
 2. Accept only pages that contain `Pooling`, `Quantum`, and `Connectivity`.
-3. Accept only tables whose headers indicate applicant, quantum, generation commissioning schedule, current schedule, and GNA status content.
-4. Extract JCC rows containing `connectivity_applicant`, `schedule_as_per_current_jcc`, `schedule_current_jcc_ists_scope`, and `connectivity_start_date_under_gna`.
-5. The `schedule_current_jcc_ists_scope` column corresponds to the PDF column "Under ISTS Scope Connectivity / Transmission System". This text may contain the bay number.
-6. JCC rows are not mapped immediately during extraction. They are used later by the CMETS-first Layer 4 mapping.
-7. TGNA/GNA and JCC bay number extraction happen only after a CMETS row is matched to a JCC row.
+3. Use the LLM to extract the exact raw JCC table text. Do not infer, normalize, or logically derive the raw values during extraction.
+4. Extract only these raw JCC columns from the table: `Pooling Station`, `Connectivity Applicant`, `Connectivity Quantum (MW)`, `Under Grantee scope Gen Commissioning /Connectivity line schedule`, and `Connectivity Start Date under GNA and Connectivity Effectiveness date`.
+5. Add computed columns after raw extraction: `total COD`, `COD_Found`, `effective_date`, `TGNA`, and `GNA`.
+6. `total COD` and `COD_Found` are derived only from the `Generation:` part of `Under Grantee scope Gen Commissioning /Connectivity line schedule`.
+7. `effective_date` is extracted from `Connectivity Start Date under GNA and Connectivity Effectiveness date`.
+8. JCC rows are not mapped immediately during extraction. They are used later by the CMETS-first Layer 4 mapping.
+9. TGNA/GNA calculation happens only after a CMETS row is matched to a JCC row.
 
 ### 4. Bay Allocation Source Workflow
 
@@ -237,51 +244,74 @@ Effectiveness and JCC depend heavily on this ID cascade. Bay Allocation fallback
 | `source_pdf`                        | JCC internal  | Source JCC PDF name.                                                                             |
 | `page_number`                       | JCC internal  | Page where the table row was found.                                                              |
 | `sr_no`                             | JCC PDF table | Serial number.                                                                                   |
-| `pooling_station`                   | JCC PDF table | Pooling station/substation in JCC row.                                                           |
-| `connectivity_applicant`            | JCC PDF table | Applicant text. This is where CMETS GNA/LTA/5.2 IDs are searched.                                |
-| `connectivity_quantum_mw`           | JCC PDF table | Connectivity quantum in MW.                                                                      |
-| `gen_comm_schedule_prev_jcc`        | JCC PDF table | Previous JCC generation commissioning schedule.                                                  |
-| `schedule_as_per_current_jcc`       | JCC PDF table | Current JCC generation/line schedule. Used to compute GNA/TGNA MW.                               |
+| `pooling_station`                   | JCC PDF table | Exact raw text from `Pooling Station`.                                                           |
+| `connectivity_applicant`            | JCC PDF table | Exact raw text from `Connectivity Applicant`. This is where CMETS GNA/LTA/5.2 IDs are searched.  |
+| `connectivity_quantum_mw`           | JCC PDF table | Exact raw text from `Connectivity Quantum (MW)`.                                                  |
+| `schedule_as_per_current_jcc`       | JCC PDF table | Exact raw text from `Under Grantee scope Gen Commissioning /Connectivity line schedule`. Used later to compute `total COD` and `COD_Found`. |
 | `schedule_current_jcc_ists_scope`   | JCC PDF table | Text from "Under ISTS Scope Connectivity / Transmission System". It may contain bay number details. It is not used for GNA/TGNA MW calculation, but after a CMETS row is matched to this JCC row, the code extracts bay number from this text first. |
-| `connectivity_start_date_under_gna` | JCC PDF table | Status text used to decide whether the matched row is GNA or TGNA.                               |
+| `connectivity_start_date_under_gna` | JCC PDF table | Exact raw text from `Connectivity Start Date under GNA and Connectivity Effectiveness date`. Used later to extract `effective_date`. |
+| `total COD`                         | Computed      | Sum of MW values found under the `Generation:` section only, when those MW entries have a date and mention `COD` or `Commissioned`. |
+| `COD_Found`                         | Computed      | `True` when qualifying `Generation:` entries with MW, date, and `COD`/`Commissioned` are found. Otherwise `False`. |
+| `effective_date`                    | Computed      | Date extracted from `connectivity_start_date_under_gna`, for example `12.12.2025` from text like `Connectivity effective w.e.f. 12.12.2025`. |
+| `TGNA`                              | Computed      | Filled with `total COD` only when `COD_Found` is `True` and `effective_date` is after the current run date. Otherwise blank. |
+| `GNA`                               | Computed      | Filled with `total COD` only when `COD_Found` is `True` and the current run date is after `effective_date`. Otherwise blank. |
 | `remarks`                           | JCC PDF table | Remarks from JCC table.                                                                          |
 
 ### JCC Extraction Rules
 
 - A JCC page must contain `Pooling`, `Quantum`, and `Connectivity`.
-- A table is accepted if its header contains at least 3 of: pooling, applicant, quantum, gen comm, schedule as per, connectivity start.
+- A table is accepted when it contains the target JCC columns: `Pooling Station`, `Connectivity Applicant`, `Connectivity Quantum (MW)`, `Under Grantee scope Gen Commissioning /Connectivity line schedule`, and `Connectivity Start Date under GNA and Connectivity Effectiveness date`.
+- The JCC extractor and handler should use the LLM for extraction.
+- Raw JCC extraction must be exact column extraction from the source table. Do not use logical inference while filling the raw columns.
 - Header rows are skipped when they contain pooling/grantee scope/under ISTS wording.
 
 ### JCC Mapping and Computed Columns
 
 | Output column    | Source          | Rule                                                                                                                                                 |
 | ---------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TGNA`         | Matched JCC row | If `connectivity_start_date_under_gna` is not effective and schedule text has MW values marked `Commissioned`, sum those commissioned MW values. |
-| `GNA`          | Matched JCC row | If status contains `effective` and is not `not effective` or `non-effective`, sum all MW values in `schedule_as_per_current_jcc`.            |
+| `total COD`    | Matched JCC row | Read `schedule_as_per_current_jcc`. Under `Generation:` only, sum MW entries that also have a date and mention `COD` or `Commissioned`. |
+| `COD_Found`    | Matched JCC row | `True` when at least one qualifying `Generation:` COD/Commissioned MW entry is found; otherwise `False`. |
+| `effective_date` | Matched JCC row | Extract only the date from `connectivity_start_date_under_gna`, such as `12.12.2025`. |
+| `TGNA`         | Matched JCC row | If `COD_Found` is `True` and `effective_date` is after the current run date, write `total COD`; otherwise keep blank. |
+| `GNA`          | Matched JCC row | If `COD_Found` is `True` and the current run date is after `effective_date`, write `total COD`; otherwise keep blank. |
 | `Match Source` | Mapping logic   | Shows whether row matched through GNA, LTA, or 5.2 ID.                                                                                               |
 | `Bay No (JCC)` | Matched JCC row | Extracted from `schedule_current_jcc_ists_scope` / `ists_scope` after the CMETS row is matched to JCC. Multiple bay numbers are joined with `\|`. |
 
 Layer 4 now runs every pipeline execution. For every CMETS row, it searches JCC `connectivity_applicant` in this order: GNA ID, then LTA ID, then 5.2 ID. Once the JCC row is identified, the same matched row is used for GNA/TGNA and for extracting the JCC bay number from the ISTS-scope column.
 
-### JCC Commissioned TGNA and GNA Logic
+### JCC COD, TGNA, and GNA Logic
 
-The code already contains this logic in `pipeline/jcc_handler/jcc_output_layer.py`.
+The JCC handler should follow this logic in `pipeline/jcc_handler/jcc_output_layer.py`.
 
 1. Matching happens first. CMETS IDs are searched inside JCC `connectivity_applicant`. The ID cascade is `GNA/ST II Application ID` -> `LTA Application ID` -> `Application ID under Enhancement 5.2 or revision`.
-2. After a JCC row is matched, `connectivity_start_date_under_gna` decides whether the row is treated as GNA or TGNA.
-3. GNA path: if `connectivity_start_date_under_gna` contains `effective`, except negated phrases like `not effective` or `non-effective`, then the system reads `schedule_as_per_current_jcc` and sums every MW value in that schedule. The result is written to `GNA`.
-4. TGNA path: if `connectivity_start_date_under_gna` is non-empty but not effective, the system reads `schedule_as_per_current_jcc` and sums only MW values whose nearby text says `Commissioned`. The result is written to `TGNA`.
-5. GNA and TGNA are mutually exclusive for a matched JCC row. A row can populate `GNA`, or `TGNA`, or neither if the matched JCC row lacks usable MW text.
+2. After a JCC row is matched, read `schedule_as_per_current_jcc`, which is the raw text from `Under Grantee scope Gen Commissioning /Connectivity line schedule`.
+3. Look only inside the `Generation:` section. Ignore line schedule, transmission, ISTS, or any other non-generation section.
+4. Add MW values only when the same entry has a date and mentions `COD` or `Commissioned`.
+5. Write the sum to `total COD` and set `COD_Found = True`. If no qualifying entry is found, set `COD_Found = False` and keep `total COD`, `effective_date`, `TGNA`, and `GNA` blank.
+6. If `COD_Found = True`, extract `effective_date` from `connectivity_start_date_under_gna`. For example, from `Connectivity effective w.e.f. 12.12.2025`, keep only `12.12.2025`.
+7. Compare `effective_date` with the current run date. If the current run date is after `effective_date`, write `total COD` to `GNA`.
+8. If `effective_date` is after the current run date, write `total COD` to `TGNA`.
+9. GNA and TGNA are mutually exclusive for a matched JCC row. If `COD_Found = False`, both stay blank.
 
-Example TGNA schedule text:
+Example generation schedule text:
 
 ```text
-111.8 MW: 19.05.2025 (Commissioned)
-88.2 MW: 01.06.2025 (Commissioned)
-100 MW: 30.09.2025
+Generation:
+110 MW: 12.06.2023 (Commissioned)
+50 MW: 05.06.2023 (Commissioned)
+30 MW: 10.06.2023 (Commissioned)
 ```
 
-Only the commissioned values are used for TGNA, so `TGNA = 111.8 + 88.2 = 200`. The uncommissioned `100 MW` is ignored for TGNA.
+Here `total COD = 110 + 50 + 30 = 190` and `COD_Found = True`.
+
+```text
+Generation:
+110 MW: 20.06.2023 (COD)
+50 MW: 05.06.2023 (COD)
+30 MW: 10.06.2023 (COD)
+```
+
+This also gives `total COD = 190` and `COD_Found = True`. If the entries do not mention `COD` or `Commissioned`, `COD_Found = False` and `TGNA`/`GNA` remain blank.
 
 ## Bay Allocation Columns
 
