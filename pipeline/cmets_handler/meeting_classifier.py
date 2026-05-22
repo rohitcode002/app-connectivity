@@ -39,6 +39,7 @@ import shutil
 import subprocess
 import tempfile
 import base64
+import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -303,11 +304,8 @@ def _resolve_tesseract_command(require_configured: bool = False) -> tuple[str, s
     return "", "tesseract not configured"
 
 
-def _render_first_page_png_bytes(pdf_path: str, dpi: int = 200) -> tuple[bytes, str]:
-    """Render physical page 1 as PNG bytes using pdftoppm."""
-    if not shutil.which("pdftoppm"):
-        return b"", "pdftoppm not installed"
-
+def _render_first_page_with_pdftoppm(pdf_path: str, dpi: int) -> tuple[bytes, str]:
+    """Render physical page 1 with the pdftoppm command."""
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             prefix = Path(tmpdir) / "cmets_page"
@@ -334,6 +332,52 @@ def _render_first_page_png_bytes(pdf_path: str, dpi: int = 200) -> tuple[bytes, 
         return b"", "pdftoppm timed out"
     except Exception as exc:
         return b"", f"pdftoppm failed: {exc}"
+
+
+def _render_first_page_with_pdf2image(pdf_path: str, dpi: int) -> tuple[bytes, str]:
+    """Render physical page 1 with the optional pdf2image package."""
+    try:
+        from pdf2image import convert_from_path
+    except Exception as exc:
+        return b"", f"pdf2image not available: {exc}"
+
+    try:
+        images = convert_from_path(
+            pdf_path,
+            dpi=dpi,
+            first_page=1,
+            last_page=1,
+            fmt="png",
+            thread_count=1,
+        )
+        if not images:
+            return b"", "pdf2image did not produce a page image"
+
+        buf = io.BytesIO()
+        images[0].save(buf, format="PNG")
+        return buf.getvalue(), ""
+    except Exception as exc:
+        return b"", f"pdf2image failed: {exc}"
+
+
+def _render_first_page_png_bytes(pdf_path: str, dpi: int = 200) -> tuple[bytes, str]:
+    """Render physical page 1 as PNG bytes using pdftoppm, then pdf2image."""
+    errors: list[str] = []
+
+    if shutil.which("pdftoppm"):
+        image_bytes, error = _render_first_page_with_pdftoppm(pdf_path, dpi)
+        if image_bytes:
+            return image_bytes, ""
+        errors.append(error)
+    else:
+        errors.append("pdftoppm not installed")
+
+    image_bytes, error = _render_first_page_with_pdf2image(pdf_path, dpi)
+    if image_bytes:
+        return image_bytes, ""
+    errors.append(error)
+
+    return b"", "; ".join(err for err in errors if err)
 
 
 def _ocr_first_page_text(pdf_path: str, *, require_configured: bool = False) -> OCRResult:
