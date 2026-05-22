@@ -57,6 +57,7 @@ class MeetingMeta:
     """Metadata extracted from the first page of a CMETS PDF."""
     meeting_number:       Optional[str] = None
     meeting_date:         Optional[str] = None   # dd.mm.yyyy
+    meeting_date_method:  str = ""               # "page_1_pdf_text", "page_1_ocr", or "not_found"
     cmets_gna_approved:   Optional[str] = None   # meeting number (if GNA pathway)
     cmets_lta_approved:   Optional[str] = None   # meeting number (if LTA pathway)
     cmets_gna_meeting_date: Optional[str] = None # meeting date   (if GNA pathway)
@@ -102,6 +103,7 @@ class MeetingMeta:
         return {
             "meeting_number": self.meeting_number,
             "meeting_date": self.meeting_date,
+            "meeting_date_method": self.meeting_date_method or "not_found",
             "classification": self.classification,
             "gna_count": self.gna_count,
             "lta_count": self.lta_count,
@@ -467,6 +469,8 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                     or _extract_meeting_number(early_pages_text)
                 )
             meta.meeting_date = _extract_meeting_date(first_physical_page_pdf_text)
+            if meta.meeting_date:
+                meta.meeting_date_method = "page_1_pdf_text"
 
             if not meta.meeting_date:
                 first_page_ocr = _ocr_first_page_text(pdf_path, require_configured=True)
@@ -477,6 +481,7 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                 meta.first_page_text = first_page_ocr.text
                 meta.first_page_text_source = "ocr" if first_page_ocr.text.strip() else "empty"
                 meta.meeting_date = _extract_meeting_date(first_page_ocr.text)
+                meta.meeting_date_method = "page_1_ocr" if meta.meeting_date else "not_found"
                 if not meta.meeting_number:
                     meta.meeting_number = _extract_meeting_number(first_page_ocr.text)
             else:
