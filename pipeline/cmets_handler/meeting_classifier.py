@@ -33,10 +33,12 @@ dict is injected into every flattened row during the _flatten() step.
 
 from __future__ import annotations
 
+import os
 import re
 import logging
 import shutil
 import subprocess
+import sys
 import tempfile
 import base64
 import io
@@ -46,9 +48,12 @@ from typing import Optional
 
 import pdfplumber
 
-from config import TESSERACT_CMD, TESSERACT_OCR_DIR
+from config import TESSERACT_CMD, TESSERACT_OCR_DIR, MODEL
+from llm_client import call_llm, extract_text_from_response
 
 logger = logging.getLogger(__name__)
+
+_IS_WINDOWS = sys.platform.startswith("win")
 
 
 # ── Result container ─────────────────────────────────────────────────────────
@@ -304,8 +309,27 @@ def _resolve_tesseract_command(require_configured: bool = False) -> tuple[str, s
     return "", "tesseract not configured"
 
 
+def _render_first_page_with_pdfplumber(pdf_path: str, dpi: int) -> tuple[bytes, str]:
+    """Render physical page 1 using pdfplumber's built-in renderer (pure Python).
+
+    This is the most portable method — it needs only pdfplumber + Pillow,
+    both of which are already project dependencies.  Works on Windows, Linux,
+    and macOS without any native binaries.
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            if not pdf.pages:
+                return b"", "pdfplumber: PDF has no pages"
+            img = pdf.pages[0].to_image(resolution=dpi)
+            buf = io.BytesIO()
+            img.original.save(buf, format="PNG")
+            return buf.getvalue(), ""
+    except Exception as exc:
+        return b"", f"pdfplumber render failed: {exc}"
+
+
 def _render_first_page_with_pdftoppm(pdf_path: str, dpi: int) -> tuple[bytes, str]:
-    """Render physical page 1 with the pdftoppm command."""
+    """Render physical page 1 with the pdftoppm command (Linux/macOS only)."""
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             prefix = Path(tmpdir) / "cmets_page"
@@ -361,56 +385,200 @@ def _render_first_page_with_pdf2image(pdf_path: str, dpi: int) -> tuple[bytes, s
 
 
 def _render_first_page_png_bytes(pdf_path: str, dpi: int = 200) -> tuple[bytes, str]:
-    """Render physical page 1 as PNG bytes using pdftoppm, then pdf2image."""
+    """Render physical page 1 as PNG bytes.
+
+    Fallback chain (first success wins):
+      1. pdfplumber  — pure-Python, works everywhere (Windows + Linux)
+      2. pdftoppm    — CLI tool, Linux/macOS only
+      3. pdf2image   — needs poppler installed
+    """
     errors: list[str] = []
 
-    if shutil.which("pdftoppm"):
+    # --- Attempt 1: pdfplumber (pure-Python, always available) ---
+    image_bytes, error = _render_first_page_with_pdfplumber(pdf_path, dpi)
+    if image_bytes:
+        logger.debug("[MeetingClassifier] Page 1 rendered via pdfplumber")
+        return image_bytes, ""
+    errors.append(error)
+
+    # --- Attempt 2: pdftoppm (Linux/macOS CLI tool) ---
+    if not _IS_WINDOWS and shutil.which("pdftoppm"):
         image_bytes, error = _render_first_page_with_pdftoppm(pdf_path, dpi)
         if image_bytes:
+            logger.debug("[MeetingClassifier] Page 1 rendered via pdftoppm")
             return image_bytes, ""
         errors.append(error)
     else:
-        errors.append("pdftoppm not installed")
+        errors.append("pdftoppm not available" if _IS_WINDOWS else "pdftoppm not installed")
 
+    # --- Attempt 3: pdf2image ---
     image_bytes, error = _render_first_page_with_pdf2image(pdf_path, dpi)
     if image_bytes:
+        logger.debug("[MeetingClassifier] Page 1 rendered via pdf2image")
         return image_bytes, ""
     errors.append(error)
 
     return b"", "; ".join(err for err in errors if err)
 
 
-def _ocr_first_page_text(pdf_path: str, *, require_configured: bool = False) -> OCRResult:
-    """OCR physical page 1 and return text plus availability/error details."""
-    tesseract_cmd, command_error = _resolve_tesseract_command(require_configured=require_configured)
-    if command_error:
-        return OCRResult(error=command_error)
+def _ocr_with_llm_vision(
+    image_bytes: bytes,
+    vm_mode: bool,
+    api_key: Optional[str],
+    llm_script_path: Optional[str],
+) -> OCRResult:
+    """OCR using GPT-4o-mini vision — zero native dependencies needed.
 
-    image_bytes, render_error = _render_first_page_png_bytes(pdf_path, dpi=220)
-    if render_error:
-        return OCRResult(error=render_error, command=tesseract_cmd)
+    Sends the rendered page image to the LLM and asks it to extract ALL
+    visible text.  This is the primary OCR method because it works on
+    every platform (Windows, Linux, macOS) without Tesseract or poppler.
+    """
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    data_url = f"data:image/png;base64,{b64}"
+
+    prompt = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are an OCR assistant. Extract ALL visible text from the "
+                    "provided image exactly as it appears, preserving line breaks. "
+                    "Do NOT add any commentary or explanation — return ONLY the "
+                    "raw text content."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url, "detail": "high"},
+                    },
+                    {
+                        "type": "text",
+                        "text": "Extract all text from this PDF page image.",
+                    },
+                ],
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": 3000,
+    }
 
     try:
-        with tempfile.NamedTemporaryFile(suffix=".png") as image_file:
-            image_file.write(image_bytes)
-            image_file.flush()
-            result = subprocess.run(
-                [tesseract_cmd, image_file.name, "stdout", "--psm", "6"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+        resp = call_llm(
+            prompt,
+            vm=vm_mode,
+            api_key=api_key,
+            model=MODEL,
+            script_path=llm_script_path,
+        )
+        text = extract_text_from_response(resp)
+        return OCRResult(
+            text=text or "",
+            available=True,
+            command=f"llm_vision ({MODEL})",
+        )
+    except Exception as exc:
+        return OCRResult(
+            available=True,
+            error=f"LLM vision OCR failed: {exc}",
+            command=f"llm_vision ({MODEL})",
+        )
+
+
+def _ocr_with_tesseract_subprocess(image_bytes: bytes, tesseract_cmd: str) -> OCRResult:
+    """OCR using tesseract CLI via subprocess (optional fallback).
+
+    Uses delete=False on NamedTemporaryFile to avoid Windows file-locking
+    issues (Windows cannot open a file that another process has open).
+    """
+    tmp_path = None
+    try:
+        tmp_file = tempfile.NamedTemporaryFile(
+            suffix=".png", delete=False,
+        )
+        tmp_path = tmp_file.name
+        tmp_file.write(image_bytes)
+        tmp_file.close()
+
+        result = subprocess.run(
+            [tesseract_cmd, tmp_path, "stdout", "--psm", "6"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
     except subprocess.TimeoutExpired:
         return OCRResult(available=True, error="tesseract timed out", command=tesseract_cmd)
     except Exception as exc:
-        return OCRResult(available=True, error=f"tesseract failed: {exc}", command=tesseract_cmd)
+        return OCRResult(available=True, error=f"tesseract subprocess failed: {exc}", command=tesseract_cmd)
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     if result.returncode != 0:
         err = (result.stderr or "").strip() or f"tesseract exited with code {result.returncode}"
         return OCRResult(available=True, error=err, command=tesseract_cmd)
 
     return OCRResult(text=result.stdout or "", available=True, command=tesseract_cmd)
+
+
+def _ocr_first_page_text(
+    pdf_path: str,
+    *,
+    vm_mode: bool = False,
+    api_key: Optional[str] = None,
+    llm_script_path: Optional[str] = None,
+) -> OCRResult:
+    """OCR physical page 1 and return text plus availability/error details.
+
+    Fallback chain:
+      1. LLM Vision (GPT-4o-mini)  — zero native deps, works everywhere
+      2. Tesseract CLI subprocess  — optional, only if tesseract is installed
+    """
+    print("  [MeetingClassifier] PDF text extraction failed — falling back to OCR...")
+    logger.info("[MeetingClassifier] PDF text extraction failed — falling back to OCR")
+
+    image_bytes, render_error = _render_first_page_png_bytes(pdf_path, dpi=220)
+    if render_error:
+        print(f"  [MeetingClassifier] ✗ Could not render page 1 to image: {render_error}")
+        return OCRResult(error=render_error)
+
+    print("  [MeetingClassifier] ✓ Page 1 rendered to image successfully")
+
+    # --- Attempt 1: LLM Vision (always available, no native deps) ---
+    print(f"  [MeetingClassifier] Trying OCR method: LLM Vision ({MODEL})...")
+    ocr_result = _ocr_with_llm_vision(image_bytes, vm_mode, api_key, llm_script_path)
+    if ocr_result.text.strip():
+        print(f"  [MeetingClassifier] ✓ OCR succeeded via LLM Vision")
+        return ocr_result
+    if ocr_result.error:
+        print(f"  [MeetingClassifier] ✗ LLM Vision: {ocr_result.error}")
+        logger.debug("[MeetingClassifier] LLM Vision OCR failed: %s", ocr_result.error)
+
+    # --- Attempt 2: tesseract CLI subprocess (only if installed) ---
+    tesseract_cmd, command_error = _resolve_tesseract_command(require_configured=False)
+    if command_error:
+        print(f"  [MeetingClassifier] ✗ tesseract CLI: {command_error} (skipping)")
+        # Return whatever LLM gave us (even if empty)
+        return ocr_result
+
+    print(f"  [MeetingClassifier] Trying OCR method: tesseract CLI ({tesseract_cmd})...")
+    tess_result = _ocr_with_tesseract_subprocess(image_bytes, tesseract_cmd)
+    if tess_result.text.strip():
+        print(f"  [MeetingClassifier] ✓ OCR succeeded via tesseract CLI")
+        return tess_result
+    elif tess_result.error:
+        print(f"  [MeetingClassifier] ✗ tesseract CLI: {tess_result.error}")
+    else:
+        print(f"  [MeetingClassifier] ✗ tesseract CLI returned empty text")
+
+    # Return best available result
+    return ocr_result if ocr_result.text.strip() else tess_result
 
 def _first_page_png_base64(pdf_path: str) -> str:
     """Render physical page 1 as PNG and return base64 for JSON diagnostics."""
@@ -458,7 +626,13 @@ def _classify(gna_count: int, lta_count: int) -> str:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def classify_meeting(pdf_path: str) -> MeetingMeta:
+def classify_meeting(
+    pdf_path: str,
+    *,
+    vm_mode: bool = False,
+    api_key: Optional[str] = None,
+    llm_script_path: Optional[str] = None,
+) -> MeetingMeta:
     """Extract meeting metadata from a CMETS PDF.
 
     Steps:
@@ -471,6 +645,12 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
     ----------
     pdf_path : str
         Absolute path to the CMETS PDF.
+    vm_mode : bool
+        If True, use VM batch script for LLM calls.
+    api_key : str | None
+        OpenAI API key for direct LLM calls.
+    llm_script_path : str | None
+        Path to LLM batch script (VM mode).
 
     Returns
     -------
@@ -512,12 +692,22 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                     _extract_meeting_number(first_physical_page_pdf_text)
                     or _extract_meeting_number(early_pages_text)
                 )
+
+            # ── Meeting date: try PDF text first, then OCR ────────────────
+            print(f"  [MeetingClassifier] Attempting date extraction via: page_1_pdf_text")
             meta.meeting_date = _extract_meeting_date(first_physical_page_pdf_text)
             if meta.meeting_date:
                 meta.meeting_date_method = "page_1_pdf_text"
+                print(f"  [MeetingClassifier] ✓ Date found via page_1_pdf_text: {meta.meeting_date}")
 
             if not meta.meeting_date:
-                first_page_ocr = _ocr_first_page_text(pdf_path, require_configured=True)
+                print(f"  [MeetingClassifier] ✗ No date found in PDF text — attempting OCR fallback")
+                first_page_ocr = _ocr_first_page_text(
+                    pdf_path,
+                    vm_mode=vm_mode,
+                    api_key=api_key,
+                    llm_script_path=llm_script_path,
+                )
                 meta.first_page_ocr_text = first_page_ocr.text
                 meta.first_page_ocr_available = first_page_ocr.available
                 meta.first_page_ocr_error = first_page_ocr.error
@@ -526,6 +716,10 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                 meta.first_page_text_source = "ocr" if first_page_ocr.text.strip() else "empty"
                 meta.meeting_date = _extract_meeting_date(first_page_ocr.text)
                 meta.meeting_date_method = "page_1_ocr" if meta.meeting_date else "not_found"
+                if meta.meeting_date:
+                    print(f"  [MeetingClassifier] ✓ Date found via page_1_ocr: {meta.meeting_date}")
+                else:
+                    print(f"  [MeetingClassifier] ✗ No date found via OCR either")
                 if not meta.meeting_number:
                     meta.meeting_number = _extract_meeting_number(first_page_ocr.text)
             else:
@@ -571,6 +765,13 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
         meta.cmets_lta_approved = meta.meeting_number
         meta.cmets_lta_meeting_date = meta.meeting_date
 
+    summary = (
+        f"  [MeetingClassifier] RESULT: Meeting #{meta.meeting_number or '?'}, "
+        f"Date {meta.meeting_date or 'not found'} "
+        f"(method: {meta.meeting_date_method or 'N/A'}), "
+        f"GNA: {meta.gna_count}, LTA: {meta.lta_count} → {meta.classification}"
+    )
+    print(summary)
     logger.info(
         "[MeetingClassifier] %s — Meeting #%s, Date %s, "
         "GNA: %d, LTA: %d → %s",

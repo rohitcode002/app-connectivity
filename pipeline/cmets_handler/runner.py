@@ -322,7 +322,12 @@ def run_cmets_extraction(
         # The same values are injected into every row flattened from this PDF.
         print(f"\n[{idx}/{len(pdf_paths)}] METADATA {pdf_path.name}")
         print(f"  [M] Classifying meeting type …", end=" ", flush=True)
-        meeting_meta = classify_meeting(str(pdf_path))
+        meeting_meta = classify_meeting(
+            str(pdf_path),
+            vm_mode=runtime.vm_mode,
+            api_key=runtime.api_key or None,
+            llm_script_path=runtime.llm_script_path,
+        )
         print(
             f"#{meeting_meta.meeting_number or '?'} "
             f"({meeting_meta.meeting_date or 'no date'}) → "
