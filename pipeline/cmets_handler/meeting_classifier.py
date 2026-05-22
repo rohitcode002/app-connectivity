@@ -439,43 +439,34 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
                 logger.warning("[MeetingClassifier] PDF has no pages: %s", pdf_path)
                 return meta
 
-            # ── Step 1: First page / first readable meeting page ───────────
+            # ── Step 1: First physical page ────────────────────────────────
             #
-            # Physical page 1 in CMETS minutes is often an image cover page.
-            # First use normal PDF text/filename/readable pages; if the date is
-            # still missing, OCR page 1 with configured Tesseract and save that
-            # OCR text in the JSON diagnostics.
+            # CMETS meeting dates are expected on physical page 1 only. Try
+            # normal PDF text first; if no date is found, OCR physical page 1
+            # with configured Tesseract and save that OCR text in JSON.
             first_physical_page_pdf_text = pdf.pages[0].extract_text(
                 x_tolerance=3, y_tolerance=3,
             ) or ""
             meta.first_page_image_base64 = _first_page_png_base64(pdf_path)
             meta.first_page_image_mime_type = "image/png" if meta.first_page_image_base64 else ""
+            meta.first_readable_page_number = 1 if first_physical_page_pdf_text.strip() else None
 
-            first_page_text = ""
+            # Keep the broader meeting-number fallback, but do not use these
+            # pages for meeting-date extraction.
             early_page_text_parts: list[str] = []
             for idx, page in enumerate(pdf.pages, 1):
                 candidate = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
                 if idx <= 5 and candidate.strip():
                     early_page_text_parts.append(candidate)
-                if candidate.strip():
-                    if not first_page_text:
-                        first_page_text = candidate
-                        meta.first_readable_page_number = idx
             early_pages_text = "\n".join(early_page_text_parts)
 
             meta.meeting_number = _extract_meeting_number_from_filename(pdf_path)
             if not meta.meeting_number:
                 meta.meeting_number = (
                     _extract_meeting_number(first_physical_page_pdf_text)
-                    or _extract_meeting_number(first_page_text)
                     or _extract_meeting_number(early_pages_text)
                 )
-            meta.meeting_date = (
-                _extract_meeting_date(first_physical_page_pdf_text)
-                or _extract_meeting_date_from_filename(pdf_path)
-                or _extract_meeting_date(first_page_text)
-                or _extract_meeting_date(early_pages_text)
-            )
+            meta.meeting_date = _extract_meeting_date(first_physical_page_pdf_text)
 
             if not meta.meeting_date:
                 first_page_ocr = _ocr_first_page_text(pdf_path, require_configured=True)
@@ -500,7 +491,7 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
 
             if not meta.meeting_date:
                 logger.info(
-                    "[MeetingClassifier] Could not extract meeting date from first readable page: %s",
+                    "[MeetingClassifier] Could not extract meeting date from physical page 1: %s",
                     pdf_path,
                 )
 
