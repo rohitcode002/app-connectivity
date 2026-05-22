@@ -205,6 +205,34 @@ def extract_pages(pdf_path: str, max_pages: int = -1) -> list[dict]:
     return pages
 
 
+# ── Conditional fields: only extract when detected in active_fields ───────────
+# Map: gate column name → list of LLM JSON keys to blank when the column is absent.
+# Add entries here for any column that should ONLY be extracted when its header
+# is detected on the page.
+CONDITIONAL_FIELDS: dict[str, list[str]] = {
+    "Nature of Applicant": ["Nature of Applicant"],
+}
+
+
+def _blank_conditional_fields(
+    raw_rows: list[dict], active_fields: list[str],
+) -> list[dict]:
+    """Set conditional field values to None when the column was not detected."""
+    keys_to_blank: list[str] = []
+    for gate_col, llm_keys in CONDITIONAL_FIELDS.items():
+        if gate_col not in active_fields:
+            keys_to_blank.extend(llm_keys)
+    if not keys_to_blank:
+        return raw_rows
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        for key in keys_to_blank:
+            if key in row:
+                row[key] = None
+    return raw_rows
+
+
 # ── Sub-layer C: LLM row extraction ──────────────────────────────────────────
 
 
@@ -296,6 +324,8 @@ def run_single_pdf(
         )
         print(f" {len(raw_rows)} raw")
 
+        # Blank out conditional fields not detected on this page
+        raw_rows = _blank_conditional_fields(raw_rows, active_fields)
         raw_rows = route_applications_under_52_rows(raw_rows, text)
         raw_rows   = dedup_dicts(raw_rows)
         validated  = validate_rows(raw_rows)
