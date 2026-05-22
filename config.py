@@ -38,6 +38,11 @@ PROXY_ENABLED = False
 PROXY_URL = "http://cloudproxy.adani.com:8080"
 PROXY_INSECURE_SSL = True
 
+# OCR settings for CMETS first-page meeting metadata.
+# On Windows this is usually: C:\Program Files\Tesseract-OCR
+TESSERACT_OCR_DIR = r"C:\Program Files\Tesseract-OCR"
+TESSERACT_CMD = rf"{TESSERACT_OCR_DIR}\tesseract.exe"
+
 
 @dataclass(frozen=True)
 class RuntimeConfig:

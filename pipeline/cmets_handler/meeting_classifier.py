@@ -45,6 +45,8 @@ from typing import Optional
 
 import pdfplumber
 
+from config import TESSERACT_CMD, TESSERACT_OCR_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,7 +64,11 @@ class MeetingMeta:
     classification:       str = ""               # "GNA" or "LTA"
     gna_count:            int = 0
     lta_count:            int = 0
-    first_page_text:      str = ""               # Physical page 1 text saved for JSON diagnostics
+    first_page_text:      str = ""               # Physical page 1 diagnostic text saved in JSON
+    first_page_ocr_text:  str = ""
+    first_page_ocr_available: bool = False
+    first_page_ocr_error: str = ""
+    first_page_ocr_command: str = ""
     first_page_text_source: str = ""             # "pdf_text", "ocr", or "empty"
     first_page_image_base64: str = ""            # Physical page 1 PNG, embedded in JSON diagnostics
     first_page_image_mime_type: str = ""
@@ -83,6 +89,10 @@ class MeetingMeta:
             "page_number": 1,
             "text_source": self.first_page_text_source or "empty",
             "text": self.first_page_text or "",
+            "ocr_text": self.first_page_ocr_text or "",
+            "ocr_available": self.first_page_ocr_available,
+            "ocr_error": self.first_page_ocr_error or None,
+            "ocr_command": self.first_page_ocr_command or None,
             "image_mime_type": self.first_page_image_mime_type or None,
             "image_base64": self.first_page_image_base64 or None,
         }
@@ -222,10 +232,79 @@ def _extract_meeting_date_from_filename(pdf_path: str) -> Optional[str]:
     return _extract_meeting_date(stem)
 
 
-def _ocr_first_page_text(pdf_path: str) -> str:
-    """OCR page 1 when it is image-only, if local OCR tools are available."""
-    if not shutil.which("pdftoppm") or not shutil.which("tesseract"):
-        return ""
+@dataclass
+class OCRResult:
+    text: str = ""
+    available: bool = False
+    error: str = ""
+    command: str = ""
+
+
+def _windows_path_to_wsl(path: str) -> str:
+    """Convert C:\\... to /mnt/c/... when running from WSL/Linux."""
+    m = re.match(r"^([A-Za-z]):[\\/](.*)$", path)
+    if not m:
+        return path
+    drive = m.group(1).lower()
+    rest = m.group(2).replace("\\", "/")
+    return f"/mnt/{drive}/{rest}"
+
+
+def _candidate_tesseract_commands() -> list[str]:
+    """Return tesseract commands from PATH and config, preserving order."""
+    candidates: list[str] = []
+
+    found = shutil.which("tesseract")
+    if found:
+        candidates.append(found)
+
+    configured = str(TESSERACT_CMD or "").strip()
+    configured_dir = str(TESSERACT_OCR_DIR or "").strip()
+    if configured:
+        candidates.append(configured)
+        candidates.append(_windows_path_to_wsl(configured))
+    if configured_dir:
+        candidates.append(str(Path(configured_dir) / "tesseract.exe"))
+        candidates.append(str(Path(configured_dir) / "tesseract"))
+        wsl_dir = _windows_path_to_wsl(configured_dir)
+        candidates.append(str(Path(wsl_dir) / "tesseract.exe"))
+        candidates.append(str(Path(wsl_dir) / "tesseract"))
+
+    seen: set[str] = set()
+    out: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            out.append(candidate)
+    return out
+
+
+def _resolve_tesseract_command(require_configured: bool = False) -> tuple[str, str]:
+    """Find a runnable tesseract command, optionally requiring the configured path."""
+    commands = _candidate_tesseract_commands()
+    if require_configured:
+        configured = str(TESSERACT_CMD or "").strip()
+        configured_wsl = _windows_path_to_wsl(configured)
+        commands = [
+            cmd for cmd in commands
+            if cmd in {configured, configured_wsl}
+            or str(cmd).endswith("/Tesseract-OCR/tesseract.exe")
+            or str(cmd).endswith("\\Tesseract-OCR\\tesseract.exe")
+        ]
+
+    for command in commands:
+        if shutil.which(command) or Path(command).exists():
+            return command, ""
+
+    if commands:
+        return "", "tesseract not found; tried: " + ", ".join(commands)
+    return "", "tesseract not configured"
+
+
+def _render_first_page_png_bytes(pdf_path: str, dpi: int = 200) -> tuple[bytes, str]:
+    """Render physical page 1 as PNG bytes using pdftoppm."""
+    if not shutil.which("pdftoppm"):
+        return b"", "pdftoppm not installed"
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -236,7 +315,7 @@ def _ocr_first_page_text(pdf_path: str) -> str:
                     "-f", "1",
                     "-l", "1",
                     "-png",
-                    "-r", "200",
+                    "-r", str(dpi),
                     pdf_path,
                     str(prefix),
                 ],
@@ -247,51 +326,53 @@ def _ocr_first_page_text(pdf_path: str) -> str:
             )
             images = sorted(Path(tmpdir).glob("cmets_page-*.png"))
             if not images:
-                return ""
+                return b"", "pdftoppm did not produce a page image"
+            return images[0].read_bytes(), ""
+    except subprocess.TimeoutExpired:
+        return b"", "pdftoppm timed out"
+    except Exception as exc:
+        return b"", f"pdftoppm failed: {exc}"
 
+
+def _ocr_first_page_text(pdf_path: str, *, require_configured: bool = False) -> OCRResult:
+    """OCR physical page 1 and return text plus availability/error details."""
+    tesseract_cmd, command_error = _resolve_tesseract_command(require_configured=require_configured)
+    if command_error:
+        return OCRResult(error=command_error)
+
+    image_bytes, render_error = _render_first_page_png_bytes(pdf_path, dpi=220)
+    if render_error:
+        return OCRResult(error=render_error, command=tesseract_cmd)
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png") as image_file:
+            image_file.write(image_bytes)
+            image_file.flush()
             result = subprocess.run(
-                ["tesseract", str(images[0]), "stdout", "--psm", "6"],
+                [tesseract_cmd, image_file.name, "stdout", "--psm", "6"],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=45,
+                timeout=60,
             )
-            return result.stdout or ""
-    except (subprocess.TimeoutExpired, Exception) as exc:
-        logger.debug("[MeetingClassifier] OCR fallback failed for %s: %s", pdf_path, exc)
-        return ""
+    except subprocess.TimeoutExpired:
+        return OCRResult(available=True, error="tesseract timed out", command=tesseract_cmd)
+    except Exception as exc:
+        return OCRResult(available=True, error=f"tesseract failed: {exc}", command=tesseract_cmd)
 
+    if result.returncode != 0:
+        err = (result.stderr or "").strip() or f"tesseract exited with code {result.returncode}"
+        return OCRResult(available=True, error=err, command=tesseract_cmd)
+
+    return OCRResult(text=result.stdout or "", available=True, command=tesseract_cmd)
 
 def _first_page_png_base64(pdf_path: str) -> str:
     """Render physical page 1 as PNG and return base64 for JSON diagnostics."""
-    if not shutil.which("pdftoppm"):
+    image_bytes, render_error = _render_first_page_png_bytes(pdf_path, dpi=72)
+    if render_error:
+        logger.debug("[MeetingClassifier] first-page render failed for %s: %s", pdf_path, render_error)
         return ""
-
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            prefix = Path(tmpdir) / "cmets_first_page"
-            subprocess.run(
-                [
-                    "pdftoppm",
-                    "-f", "1",
-                    "-l", "1",
-                    "-png",
-                    "-r", "72",
-                    pdf_path,
-                    str(prefix),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=45,
-            )
-            images = sorted(Path(tmpdir).glob("cmets_first_page-*.png"))
-            if not images:
-                return ""
-            return base64.b64encode(images[0].read_bytes()).decode("ascii")
-    except (subprocess.TimeoutExpired, Exception) as exc:
-        logger.debug("[MeetingClassifier] first-page render failed for %s: %s", pdf_path, exc)
-        return ""
+    return base64.b64encode(image_bytes).decode("ascii")
 
 
 # ── GNA vs LTA keyword ratio ────────────────────────────────────────────────
@@ -360,20 +441,13 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
 
             # ── Step 1: First page / first readable meeting page ───────────
             #
-            # Meeting number comes from the filename first. Meeting date is
-            # attempted from page 1 text, then page 1 OCR if it is image-only.
-            # If OCR tools are unavailable, fall back to the first readable
-            # meeting page text so image cover pages do not blank every row.
-            first_physical_page_text = pdf.pages[0].extract_text(
+            # Physical page 1 in CMETS minutes is often an image cover page.
+            # First use normal PDF text/filename/readable pages; if the date is
+            # still missing, OCR page 1 with configured Tesseract and save that
+            # OCR text in the JSON diagnostics.
+            first_physical_page_pdf_text = pdf.pages[0].extract_text(
                 x_tolerance=3, y_tolerance=3,
             ) or ""
-            meta.first_page_text_source = "pdf_text" if first_physical_page_text.strip() else "empty"
-            if not first_physical_page_text.strip():
-                ocr_text = _ocr_first_page_text(pdf_path)
-                if ocr_text.strip():
-                    first_physical_page_text = ocr_text
-                    meta.first_page_text_source = "ocr"
-            meta.first_page_text = first_physical_page_text
             meta.first_page_image_base64 = _first_page_png_base64(pdf_path)
             meta.first_page_image_mime_type = "image/png" if meta.first_page_image_base64 else ""
 
@@ -392,15 +466,31 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
             meta.meeting_number = _extract_meeting_number_from_filename(pdf_path)
             if not meta.meeting_number:
                 meta.meeting_number = (
-                    _extract_meeting_number(first_page_text)
+                    _extract_meeting_number(first_physical_page_pdf_text)
+                    or _extract_meeting_number(first_page_text)
                     or _extract_meeting_number(early_pages_text)
                 )
             meta.meeting_date = (
-                _extract_meeting_date(first_physical_page_text)
-                or _extract_meeting_date(first_page_text)
+                _extract_meeting_date(first_physical_page_pdf_text)
                 or _extract_meeting_date_from_filename(pdf_path)
+                or _extract_meeting_date(first_page_text)
                 or _extract_meeting_date(early_pages_text)
             )
+
+            if not meta.meeting_date:
+                first_page_ocr = _ocr_first_page_text(pdf_path, require_configured=True)
+                meta.first_page_ocr_text = first_page_ocr.text
+                meta.first_page_ocr_available = first_page_ocr.available
+                meta.first_page_ocr_error = first_page_ocr.error
+                meta.first_page_ocr_command = first_page_ocr.command
+                meta.first_page_text = first_page_ocr.text
+                meta.first_page_text_source = "ocr" if first_page_ocr.text.strip() else "empty"
+                meta.meeting_date = _extract_meeting_date(first_page_ocr.text)
+                if not meta.meeting_number:
+                    meta.meeting_number = _extract_meeting_number(first_page_ocr.text)
+            else:
+                meta.first_page_text = first_physical_page_pdf_text
+                meta.first_page_text_source = "pdf_text" if first_physical_page_pdf_text.strip() else "empty"
 
             if not meta.meeting_number:
                 logger.info(
