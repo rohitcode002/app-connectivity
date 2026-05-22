@@ -103,6 +103,13 @@ def _serialize(result: PipelineResult, meeting_meta: dict | None = None) -> dict
     return out
 
 
+def _attach_meeting_diagnostics(data: dict, meeting_meta) -> dict:
+    """Save first-page/classifier evidence in the per-PDF JSON cache only."""
+    data["first_page"] = meeting_meta.as_first_page_dict()
+    data["meeting_classifier"] = meeting_meta.as_diagnostics_dict()
+    return data
+
+
 def _save_json(data: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -329,6 +336,7 @@ def run_cmets_extraction(
             row_meeting_meta = meeting_meta.as_row_dict()
             data["meeting_meta"] = row_meeting_meta
             _inject_meeting_meta_into_rows(data, row_meeting_meta)
+            _attach_meeting_diagnostics(data, meeting_meta)
             _save_json(data, cache)
             all_data.append(data)
             out_path = _append_pdf_to_excel(
@@ -353,6 +361,7 @@ def run_cmets_extraction(
             max_pages=max_pages,
         )
         data = _serialize(result, meeting_meta=meeting_meta.as_row_dict())
+        _attach_meeting_diagnostics(data, meeting_meta)
         _save_json(data, cache)
         print(f"  → JSON: {cache.name}")
         all_data.append(data)

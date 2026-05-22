@@ -38,6 +38,7 @@ import logging
 import shutil
 import subprocess
 import tempfile
+import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -61,6 +62,11 @@ class MeetingMeta:
     classification:       str = ""               # "GNA" or "LTA"
     gna_count:            int = 0
     lta_count:            int = 0
+    first_page_text:      str = ""               # Physical page 1 text saved for JSON diagnostics
+    first_page_text_source: str = ""             # "pdf_text", "ocr", or "empty"
+    first_page_image_base64: str = ""            # Physical page 1 PNG, embedded in JSON diagnostics
+    first_page_image_mime_type: str = ""
+    first_readable_page_number: Optional[int] = None
 
     def as_row_dict(self) -> dict:
         """Return the 4 columns to inject into every extracted row."""
@@ -69,6 +75,27 @@ class MeetingMeta:
             "CMETS LTA Approved":     self.cmets_lta_approved,
             "CMETS GNA Meeting Date": self.cmets_gna_meeting_date,
             "CMETS LTA Meeting Date": self.cmets_lta_meeting_date,
+        }
+
+    def as_first_page_dict(self) -> dict:
+        """Return physical page-1 evidence for the per-PDF JSON cache."""
+        return {
+            "page_number": 1,
+            "text_source": self.first_page_text_source or "empty",
+            "text": self.first_page_text or "",
+            "image_mime_type": self.first_page_image_mime_type or None,
+            "image_base64": self.first_page_image_base64 or None,
+        }
+
+    def as_diagnostics_dict(self) -> dict:
+        """Return classifier diagnostics for debugging missing meeting metadata."""
+        return {
+            "meeting_number": self.meeting_number,
+            "meeting_date": self.meeting_date,
+            "classification": self.classification,
+            "gna_count": self.gna_count,
+            "lta_count": self.lta_count,
+            "first_readable_page_number": self.first_readable_page_number,
         }
 
 
@@ -189,6 +216,12 @@ def _extract_meeting_date(text: str) -> Optional[str]:
     return None
 
 
+def _extract_meeting_date_from_filename(pdf_path: str) -> Optional[str]:
+    """Extract meeting date from filenames such as '... 16-03-2026 final.pdf'."""
+    stem = Path(pdf_path).stem
+    return _extract_meeting_date(stem)
+
+
 def _ocr_first_page_text(pdf_path: str) -> str:
     """OCR page 1 when it is image-only, if local OCR tools are available."""
     if not shutil.which("pdftoppm") or not shutil.which("tesseract"):
@@ -210,6 +243,7 @@ def _ocr_first_page_text(pdf_path: str) -> str:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=45,
             )
             images = sorted(Path(tmpdir).glob("cmets_page-*.png"))
             if not images:
@@ -220,10 +254,43 @@ def _ocr_first_page_text(pdf_path: str) -> str:
                 check=False,
                 capture_output=True,
                 text=True,
+                timeout=45,
             )
             return result.stdout or ""
-    except Exception as exc:
+    except (subprocess.TimeoutExpired, Exception) as exc:
         logger.debug("[MeetingClassifier] OCR fallback failed for %s: %s", pdf_path, exc)
+        return ""
+
+
+def _first_page_png_base64(pdf_path: str) -> str:
+    """Render physical page 1 as PNG and return base64 for JSON diagnostics."""
+    if not shutil.which("pdftoppm"):
+        return ""
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prefix = Path(tmpdir) / "cmets_first_page"
+            subprocess.run(
+                [
+                    "pdftoppm",
+                    "-f", "1",
+                    "-l", "1",
+                    "-png",
+                    "-r", "72",
+                    pdf_path,
+                    str(prefix),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=45,
+            )
+            images = sorted(Path(tmpdir).glob("cmets_first_page-*.png"))
+            if not images:
+                return ""
+            return base64.b64encode(images[0].read_bytes()).decode("ascii")
+    except (subprocess.TimeoutExpired, Exception) as exc:
+        logger.debug("[MeetingClassifier] first-page render failed for %s: %s", pdf_path, exc)
         return ""
 
 
@@ -300,22 +367,39 @@ def classify_meeting(pdf_path: str) -> MeetingMeta:
             first_physical_page_text = pdf.pages[0].extract_text(
                 x_tolerance=3, y_tolerance=3,
             ) or ""
+            meta.first_page_text_source = "pdf_text" if first_physical_page_text.strip() else "empty"
             if not first_physical_page_text.strip():
-                first_physical_page_text = _ocr_first_page_text(pdf_path)
+                ocr_text = _ocr_first_page_text(pdf_path)
+                if ocr_text.strip():
+                    first_physical_page_text = ocr_text
+                    meta.first_page_text_source = "ocr"
+            meta.first_page_text = first_physical_page_text
+            meta.first_page_image_base64 = _first_page_png_base64(pdf_path)
+            meta.first_page_image_mime_type = "image/png" if meta.first_page_image_base64 else ""
 
             first_page_text = ""
-            for page in pdf.pages:
+            early_page_text_parts: list[str] = []
+            for idx, page in enumerate(pdf.pages, 1):
                 candidate = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+                if idx <= 5 and candidate.strip():
+                    early_page_text_parts.append(candidate)
                 if candidate.strip():
-                    first_page_text = candidate
-                    break
+                    if not first_page_text:
+                        first_page_text = candidate
+                        meta.first_readable_page_number = idx
+            early_pages_text = "\n".join(early_page_text_parts)
 
             meta.meeting_number = _extract_meeting_number_from_filename(pdf_path)
             if not meta.meeting_number:
-                meta.meeting_number = _extract_meeting_number(first_page_text)
+                meta.meeting_number = (
+                    _extract_meeting_number(first_page_text)
+                    or _extract_meeting_number(early_pages_text)
+                )
             meta.meeting_date = (
                 _extract_meeting_date(first_physical_page_text)
                 or _extract_meeting_date(first_page_text)
+                or _extract_meeting_date_from_filename(pdf_path)
+                or _extract_meeting_date(early_pages_text)
             )
 
             if not meta.meeting_number:
