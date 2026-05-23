@@ -104,7 +104,7 @@ def run_bay_mapping(
             f"[BayMapping] CMETS Excel not found: {cmets_path}. "
             "Run Module 1 (CMETS extraction) first."
         )
-    cmets_df = pd.read_excel(cmets_path, sheet_name=0)
+    cmets_df = pd.read_excel(cmets_path, sheet_name=0, engine="openpyxl")
     print(f"[BayMapping] CMETS rows loaded: {len(cmets_df)}")
 
     if cmets_df.empty:

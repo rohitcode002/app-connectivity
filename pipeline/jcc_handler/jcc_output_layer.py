@@ -104,7 +104,7 @@ def load_effectiveness_data(
         xlsx = Path(effectiveness_excel_path).resolve()
         if xlsx.exists():
             logger.info("[JCC-Output] Loading effectiveness Excel: %s", xlsx)
-            df = pd.read_excel(xlsx, sheet_name=0)
+            df = pd.read_excel(xlsx, sheet_name=0, engine="openpyxl")
             records = df.to_dict(orient="records")
             return _filter_valid(records)
 
@@ -961,7 +961,7 @@ def run_layer4_excel(
         print("=" * 64)
         return pd.DataFrame()
 
-    df = pd.read_excel(cmets_xlsx, sheet_name=0)
+    df = pd.read_excel(cmets_xlsx, sheet_name=0, engine="openpyxl")
     print(f"  CMETS Excel  : {cmets_xlsx}")
     print(f"  Rows loaded  : {len(df)}")
 

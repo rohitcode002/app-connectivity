@@ -87,7 +87,7 @@ def run_mapping(
             f"[Mapping] cmets.xlsx not found: {cmets_path}. "
             "Run Module 1 (CMETS extraction) first."
         )
-    cmets_df = pd.read_excel(cmets_path, sheet_name=0)
+    cmets_df = pd.read_excel(cmets_path, sheet_name=0, engine="openpyxl")
     print(f"[Mapping] CMETS rows loaded: {len(cmets_df)}")
 
     # ── Step 1: Merge (update overlapping columns + add enrichment columns) ──

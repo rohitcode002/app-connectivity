@@ -406,7 +406,7 @@ def run_full_mapping_pipeline(
             f"CMETS Excel not found: {cmets_excel}. "
             "Run Module 1 (CMETS extraction) first."
         )
-    cmets_df = pd.read_excel(cmets_excel, sheet_name=0)
+    cmets_df = pd.read_excel(cmets_excel, sheet_name=0, engine="openpyxl")
     print(f"\n[Pipeline] Base CMETS rows loaded: {len(cmets_df)}")
 
     if cmets_df.empty:

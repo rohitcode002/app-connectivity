@@ -330,7 +330,7 @@ def _run_extraction(runtime, tracker: PipelineTracker, args) -> None:
 
     if _skip("Module 2", eff_excel):
         try:
-            eff_df = pd.read_excel(eff_excel, sheet_name=0)
+            eff_df = pd.read_excel(eff_excel, sheet_name=0, engine="openpyxl")
         except Exception:
             pass
     else:
