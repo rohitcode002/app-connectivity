@@ -434,6 +434,19 @@ def run_full_mapping_pipeline(
         output_excel=step3_excel,
     )
 
+    # ── Step 4: Generate data_to_be_captured.xlsx ─────────────────────────
+    from pipeline.final_mapping_handler.data_capture import generate_data_to_be_captured
+    data_capture_excel = excel_root / "data_to_be_captured.xlsx"
+    try:
+        generate_data_to_be_captured(
+            final_mapped_excel=step3_excel,
+            output_excel=data_capture_excel,
+        )
+    except Exception as exc:
+        print(f"\n  ⚠ data_to_be_captured generation failed: {exc}")
+        import traceback
+        traceback.print_exc()
+
     # ── Final summary ─────────────────────────────────────────────────────
     print("\n" + "█" * 64)
     print("  MAPPING PIPELINE COMPLETE")
@@ -447,6 +460,7 @@ def run_full_mapping_pipeline(
     print(f"\n  Step 1 → {step1_excel}")
     print(f"  Step 2 → {step2_excel}")
     print(f"  Step 3 → {step3_excel} (FINAL)")
+    print(f"  Step 4 → {data_capture_excel} (FILTERED)")
     print("█" * 64)
 
     return step3_excel

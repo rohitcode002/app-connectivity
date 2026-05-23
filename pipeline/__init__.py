@@ -34,6 +34,7 @@ _LAZY_EXPORTS = {
     "run_bayallocation_extraction": ("pipeline.bayallocation_handler", "run_bayallocation_extraction"),
     "run_bay_mapping": ("pipeline.bay_mapping_handler", "run_bay_mapping"),
     "run_full_mapping_pipeline": ("pipeline.final_mapping_handler", "run_full_mapping_pipeline"),
+    "generate_data_to_be_captured": ("pipeline.final_mapping_handler", "generate_data_to_be_captured"),
 }
 
 
@@ -61,6 +62,7 @@ __all__ = [
     "run_bayallocation_extraction",
     "run_bay_mapping",
     "run_full_mapping_pipeline",
+    "generate_data_to_be_captured",
     # Tracker
     "PipelineTracker",
 ]
