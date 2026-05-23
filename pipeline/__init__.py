@@ -9,6 +9,7 @@ Sub-packages:
     jcc_handler/               → Module 4: JCC Meeting PDF extraction
     bayallocation_handler/     → Module 5: Bay Allocation PDF extraction
     bay_mapping_handler/       → Module 6: CMETS × Bay Allocation mapping
+    final_mapping_handler/     → Module 7: Sequential mapping pipeline (all sources → final Excel)
 
 Shared utilities:
     tracker.py                 → SQLite pipeline tracker
@@ -32,6 +33,7 @@ _LAZY_EXPORTS = {
     "run_jcc_extraction": ("pipeline.jcc_handler", "run_jcc_extraction"),
     "run_bayallocation_extraction": ("pipeline.bayallocation_handler", "run_bayallocation_extraction"),
     "run_bay_mapping": ("pipeline.bay_mapping_handler", "run_bay_mapping"),
+    "run_full_mapping_pipeline": ("pipeline.final_mapping_handler", "run_full_mapping_pipeline"),
 }
 
 
@@ -58,6 +60,7 @@ __all__ = [
     "run_jcc_extraction",
     "run_bayallocation_extraction",
     "run_bay_mapping",
+    "run_full_mapping_pipeline",
     # Tracker
     "PipelineTracker",
 ]
