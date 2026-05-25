@@ -209,6 +209,10 @@ def compute_installed_capacity(
         # ── Parse CMETS Type column values ────────────────────────────────
         cmets_type_str = safe_str(row.get(col_type)) if col_type else ""
         cmets_type_values = parse_cmets_type(cmets_type_str)
+        for cat, output_col in _CAT_TO_OUTPUT_COL.items():
+            existing_cmets_value = safe_float(row.get(output_col))
+            if existing_cmets_value > 0 and cmets_type_values.get(cat, 0.0) <= 0:
+                cmets_type_values[cat] = existing_cmets_value
 
         # ── Read effectiveness per-technology MW values ───────────────────
         eff_type_of_project = safe_str(eff_rec.get("type_of_project"))

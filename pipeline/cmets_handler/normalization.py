@@ -167,13 +167,11 @@ def norm_status(v: Optional[str]) -> Optional[str]:
     if not v:
         return None
     lower = v.lower()
-    if "withdraw" in lower:
+    if any(word in lower for word in ("withdraw", "revoke", "cancel", "reject")):
         return "Withdrawn"
-    if "revoke" in lower:
-        return "Revoked"
-    if "grant" in lower:
-        return "granted"
-    return v
+    if "grant" in lower or "approved" in lower:
+        return "Granted"
+    return "Applied"
 
 
 # ── PSP columns ─────────────────────────────────────────────────────────────

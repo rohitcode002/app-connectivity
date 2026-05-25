@@ -331,7 +331,7 @@ COLUMN_DEFS: list[ColumnDef] = [
             "Withdrawn / granted / Revoked",
         ],
         norm_func="norm_status",
-        description="Application status: Withdrawn, granted, Revoked",
+        description="Application status: Withdrawn, Granted, Applied",
     ),
 
     ColumnDef(
