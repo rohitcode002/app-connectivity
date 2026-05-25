@@ -518,3 +518,109 @@ def dedup_dicts(rows: list[dict]) -> list[dict]:
             seen.add(key)
             unique.append(row)
     return unique
+
+
+_APPLICATION_ID_COLUMNS = [
+    "GNA/ST II Application ID",
+    "LTA Application ID",
+    "Application ID under Enhancement 5.2 or revision",
+]
+
+
+def _id_tokens(value: object) -> set[str]:
+    """Return comparable application ID tokens from a cell value."""
+    value = clean(value)
+    if not value:
+        return set()
+    tokens = set()
+    for token in re.findall(r"\b\d{6,}\b", str(value)):
+        tokens.add(token)
+        tokens.add(token.lstrip("0") or "0")
+    return tokens
+
+
+def _row_application_ids(row: dict) -> set[str]:
+    """Return all GNA/LTA/5.2 IDs present in a row."""
+    ids: set[str] = set()
+    for col in _APPLICATION_ID_COLUMNS:
+        ids.update(_id_tokens(row.get(col)))
+    return ids
+
+
+def _merge_id_cell(existing: object, incoming: object) -> object:
+    """Append incoming IDs to an existing comma-separated ID cell."""
+    existing_clean = clean(existing)
+    incoming_clean = clean(incoming)
+    if not existing_clean:
+        return incoming
+    if not incoming_clean:
+        return existing
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for value in (existing_clean, incoming_clean):
+        ids = re.findall(r"\b\d{6,}\b", str(value))
+        candidates = ids or [str(value)]
+        for candidate in candidates:
+            key = candidate.lstrip("0") or "0"
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(candidate)
+    return ", ".join(ordered)
+
+
+def _merge_into_later_row(current: dict, later: dict) -> None:
+    """Merge duplicate current row data into the later row.
+
+    Later rows are treated as the newer/updated copy. Existing later values are
+    preserved, and only missing later cells are filled from the current row.
+    Application ID cells can contain comma-separated IDs, so duplicate rows keep
+    the union of GNA/LTA/5.2 IDs on the later row.
+    """
+    for col in _APPLICATION_ID_COLUMNS:
+        merged_ids = _merge_id_cell(later.get(col), current.get(col))
+        if clean(merged_ids):
+            later[col] = merged_ids
+
+    for col, value in current.items():
+        if col in _APPLICATION_ID_COLUMNS:
+            continue
+        if clean(later.get(col)):
+            continue
+        cleaned_value = clean(value)
+        if cleaned_value:
+            later[col] = value
+
+
+def consolidate_application_duplicates(rows: list[dict]) -> list[dict]:
+    """Collapse later CMETS duplicate application rows before mapping.
+
+    For each row, check whether any of its GNA/LTA/5.2 application IDs appears
+    in a later row. If yes, carry the current row's non-empty data into that
+    later row where the later row is blank, then remove the current row. This
+    keeps the newest/upcoming row while preserving useful values from the older
+    duplicate row.
+    """
+    if not rows:
+        return rows
+
+    consolidated = [dict(row) for row in rows]
+    removed: set[int] = set()
+
+    for i, current in enumerate(consolidated):
+        if i in removed:
+            continue
+        current_ids = _row_application_ids(current)
+        if not current_ids:
+            continue
+
+        for j in range(i + 1, len(consolidated)):
+            if j in removed:
+                continue
+            if current_ids.intersection(_row_application_ids(consolidated[j])):
+                _merge_into_later_row(current, consolidated[j])
+                removed.add(i)
+                break
+
+    return [row for idx, row in enumerate(consolidated) if idx not in removed]

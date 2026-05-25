@@ -58,15 +58,27 @@ raw = pd.read_csv(OG_PATH, header=None)
 main_headers = raw.iloc[1].tolist()
 sub_headers  = raw.iloc[2].tolist()
 
-# Build composite column names to match generated xlsx naming convention
+# Build composite column names to match generated xlsx naming convention.
+# The OG.csv uses merged headers: the parent name (row1) only appears on the
+# first sub-column; subsequent sub-columns have an empty row1.  We carry the
+# last non-empty row1 value forward so "Wind", "Hybrid" etc. get the correct
+# parent prefix like "Installed/Break-up Capacity (MW) Wind".
 og_col_names = []
+last_main = ""
 for i, (main, sub) in enumerate(zip(main_headers, sub_headers)):
     m = str(main).strip() if pd.notna(main) else ""
     s = str(sub).strip()  if pd.notna(sub)  else ""
+    if m:
+        last_main = m  # remember the parent header
     if m and s:
+        # First sub-column under a new parent  e.g. "Installed/Break-up Capacity (MW) Solar"
         og_col_names.append(f"{m} {s}")
-    elif m:
+    elif m and not s:
+        # Standalone column with no sub-header  e.g. "Type"
         og_col_names.append(m)
+    elif not m and s:
+        # Continuation sub-column under the same parent  e.g. "" + "Wind" → "Installed/Break-up Capacity (MW) Wind"
+        og_col_names.append(f"{last_main} {s}")
     else:
         og_col_names.append(f"_col_{i}")
 

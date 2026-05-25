@@ -132,7 +132,7 @@ COLUMN_DEFS: list[ColumnDef] = [
             "GNA/ST II Application ID",
         ],
         norm_func="norm_num_ids",
-        description="GNA or Stage-II application ID (10-digit, starts with 12/22/11)",
+        description="GNA or Stage-II application IDs (10-digit, starts with 12/22/11), comma-separated if multiple",
     ),
 
     ColumnDef(

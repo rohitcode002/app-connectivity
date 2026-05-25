@@ -29,6 +29,7 @@ from pipeline.excel_utils import (
 from pipeline.cmets_handler.models import PipelineResult, CMETS_COLUMNS
 from pipeline.cmets_handler.extraction import run_single_pdf
 from pipeline.cmets_handler.meeting_classifier import classify_meeting
+from pipeline.cmets_handler.normalization import consolidate_application_duplicates
 from pipeline.token_usage import DEFAULT_TOKEN_USAGE_PATH, get_module_token_usage
 
 logger = logging.getLogger(__name__)
@@ -255,6 +256,59 @@ def _append_pdf_to_excel(
     return xlsx
 
 
+def _rewrite_extracted_sheet(
+    records: list[dict],
+    xlsx: Path,
+    started_at: datetime,
+    updated_at: datetime,
+    runtime_s: float,
+    stats: dict,
+    duplicates_removed: int,
+) -> Path:
+    """Rewrite Extracted Data with final CMETS-only consolidated rows."""
+    opx = _get_openpyxl()
+    wb = opx.load_workbook(xlsx) if xlsx.exists() else opx.Workbook()
+
+    if "Extracted Data" in wb.sheetnames:
+        ws = wb["Extracted Data"]
+        ws.delete_rows(1, ws.max_row)
+    else:
+        ws = wb.active
+        ws.title = "Extracted Data"
+
+    ws.append(CMETS_COLUMNS)
+    for record in records:
+        ws.append([record.get(col) for col in CMETS_COLUMNS])
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    _apply_header_style(ws, opx)
+    _apply_data_style(ws, opx)
+    _autosize_columns(ws)
+
+    if "Run Summary" in wb.sheetnames:
+        del wb["Run Summary"]
+    ws_summary = wb.create_sheet("Run Summary")
+    for row in [
+        ("Run started at",           started_at.isoformat(timespec="seconds")),
+        ("Last updated at",          updated_at.isoformat(timespec="seconds")),
+        ("Runtime so far (seconds)", round(runtime_s, 2)),
+        ("PDFs processed",           stats["pdfs_processed"]),
+        ("Total pages extracted",    stats["total_pages_extracted"]),
+        ("Total pages passed gate",  stats["total_pages_passed_gate"]),
+        ("Total pages skipped",      stats["total_pages_skipped"]),
+        ("Raw extracted rows",       stats["total_rows"]),
+        ("Rows after consolidation", len(records)),
+        ("Duplicate rows removed",   duplicates_removed),
+    ]:
+        ws_summary.append(list(row))
+    _autosize_columns(ws_summary)
+
+    xlsx.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(xlsx)
+    return xlsx
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def run_cmets_extraction(
@@ -383,13 +437,26 @@ def run_cmets_extraction(
     runtime_s   = perf_counter() - t0
     finished_at = datetime.now()
     stats       = _agg_stats(all_data)
+    raw_records = _flatten(all_data)
+    consolidated_records = consolidate_application_duplicates(raw_records)
+    duplicates_removed = len(raw_records) - len(consolidated_records)
+    _rewrite_extracted_sheet(
+        consolidated_records,
+        xlsx,
+        started_at,
+        finished_at,
+        runtime_s,
+        stats,
+        duplicates_removed,
+    )
 
     print("\n" + "=" * 64)
     print("  CMETS SUMMARY")
     print(f"    PDFs          : {len(pdf_paths)}  (skipped {cached})")
     print(f"    Pages ext.    : {stats['total_pages_extracted']}")
     print(f"    Pages passed  : {stats['total_pages_passed_gate']}")
-    print(f"    Total rows    : {stats['total_rows']}")
+    print(f"    Raw rows      : {stats['total_rows']}")
+    print(f"    Final rows    : {len(consolidated_records)}  (removed {duplicates_removed})")
     print(f"    Runtime (s)   : {runtime_s:.1f}")
     token_usage = get_module_token_usage("cmets")
     token_total = token_usage["total_tokens"] + token_usage["estimated_total_tokens"]

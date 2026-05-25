@@ -31,6 +31,9 @@ PRIMARY KEY RULE (CRITICAL):
     • "LTA Application ID"
     • "Application ID under Enhancement 5.2 or revision"
   If a row has NONE of these three IDs, DO NOT output it.
+  If one table row/cell contains multiple GNA/ST-II IDs, keep them together in
+  "GNA/ST II Application ID" as a comma-separated string. Do NOT split one
+  applicant/table row into multiple rows only because multiple GNA IDs are shown.
 
 5.2 PAGE ROUTING RULE (CRITICAL):
   If the FULL PAGE TEXT contains the heading/phrase "Applications under 5.2 received",
@@ -38,7 +41,8 @@ PRIMARY KEY RULE (CRITICAL):
   page, put all numeric application numbers from "Application No. & Date" or
   "Application ID" into "Application ID under Enhancement 5.2 or revision" and
   leave "GNA/ST II Application ID" null. If that exact 5.2 received phrase is
-  absent, extract normal GNA/ST-II application numbers into "GNA/ST II Application ID".
+  absent, extract all normal GNA/ST-II application numbers into "GNA/ST II Application ID",
+  comma-separated when multiple IDs appear in the same row/cell.
 
 SKIP RULES — DO NOT extract rows if:
   • "Nature of Applicant" is "Bulk consumer" or "Drawee entity" or

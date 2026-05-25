@@ -36,7 +36,7 @@ SOURCE_REGIONS = ["Northern Region"]
 # Proxy settings for VM downloader
 PROXY_ENABLED = False
 PROXY_URL = "http://cloudproxy.adani.com:8080"
-PROXY_INSECURE_SSL = True
+PROXY_INSECURE_SSL = False
 
 # OCR settings for CMETS first-page meeting metadata.
 # On Windows this is usually: C:\Program Files\Tesseract-OCR
