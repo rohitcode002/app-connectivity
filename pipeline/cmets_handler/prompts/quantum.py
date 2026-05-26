@@ -1,38 +1,27 @@
 """
 Quantum (MW) — prompt section
 ================================
-Application Quantum and Granted Quantum.
+Application Quantum (applied MW capacity).
+Granted Quantum is NOT extracted — it is calculated in post-processing
+from Application Quantum + Status.
 """
 
 # ── Output key(s) for the LLM JSON response ─────────────────────────────────
-OUTPUT_KEY = [
-    "Application Quantum (MW)(ST II)",
-    "Granted Quantum GNA/LTA(MW)",
-]
+OUTPUT_KEY = "Application Quantum (MW)(ST II)"
 
 # ── Header name variants the PDF might use ───────────────────────────────────
-VARIANTS = {
-    "Application Quantum (MW)(ST II)": [
-        "Installed Capacity (MW)",
-        "Connectivity Quantum (MW)",
-        "Application Quantum (MW)(ST II)",
-        "Capacity (MW)",
-    ],
-    "Granted Quantum GNA/LTA(MW)": [
-        "Granted Quantum GNA/LTA(MW)",
-        "Granted Quantum (MW)",
-        "Connectivity Quantum (MW) granted",
-        "Granted Connectivity Quantum",
-    ],
-}
+VARIANTS = [
+    "Installed Capacity (MW)",
+    "Connectivity Quantum (MW)",
+    "Application Quantum (MW)(ST II)",
+    "Capacity (MW)",
+]
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
 Application Quantum: the MW capacity APPLIED for.
-Granted Quantum: the MW capacity actually GRANTED (may differ from applied)."""
+(Granted Quantum is computed in post-processing — do NOT extract it.)"""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
-JSON_EXAMPLE = [
-    '"Application Quantum (MW)(ST II)": "300"',
-    '"Granted Quantum GNA/LTA(MW)": "300"',
-]
+JSON_EXAMPLE = '"Application Quantum (MW)(ST II)": "300"'
+

@@ -40,23 +40,25 @@ VARIANTS = {
 RULE = """\
 GNA/ST II Application ID:
   10-digit IDs starting with 12/22/11. Extract from any column with ST-II / GNA prefix.
-  If a single row/cell contains multiple GNA/ST-II application IDs, extract ALL of them
-  into this same field as one comma-separated string, preserving the order seen.
-  Example: "1200003683, 1200003740". Do NOT create separate rows only because
-  multiple GNA IDs are listed for the same applicant/table row.
+  CRITICAL: extract only ONE single ID per row — the primary/first one seen.
+  Do NOT put multiple comma-separated IDs in this field.
+  If a cell contains multiple IDs, pick the FIRST GNA/ST-II ID.
 
 LTA Application ID:
   IDs prefixed with 04/41, or preceded by "LTA:" keyword.
+  Extract only ONE single ID — the first LTA ID found.
 
 Application ID under Enhancement 5.2 or revision:
   Use ONLY when table/row context mentions Enhancement 5.2 / regulation 5.2 / revision.
+  Extract only ONE single ID.
   CRITICAL: if the page/section title contains "Applications under 5.2 received",
-  every numeric ID from "Application No. & Date" / "Application ID" column
+  the first numeric ID from "Application No. & Date" / "Application ID" column
   belongs here, NOT in "GNA/ST II Application ID"."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
 JSON_EXAMPLE = [
-    '"GNA/ST II Application ID": "1200003683, 1200003740"',
+    '"GNA/ST II Application ID": "1200003683"',
     '"LTA Application ID": "0412100008"',
     '"Application ID under Enhancement 5.2 or revision": null',
 ]
+

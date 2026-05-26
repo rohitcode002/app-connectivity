@@ -178,16 +178,10 @@ COLUMN_DEFS: list[ColumnDef] = [
 
     ColumnDef(
         name="Granted Quantum GNA/LTA(MW)",
-        data_source="extraction",
-        llm_key="Granted Quantum GNA/LTA(MW)",
-        aliases=[
-            "Granted Quantum GNA/LTA(MW)",
-            "Granted Quantum (MW)",
-            "Connectivity Quantum (MW) granted",
-            "Granted Connectivity Quantum",
-        ],
+        data_source="calculated",
+        derived_from="Status of application(Withdrawn / granted. Revoked.), Application Quantum (MW)(ST II)",
         norm_func="clean",
-        description="Granted connectivity quantum in MW for GNA/LTA",
+        description="Calculated: equals Application Quantum (MW) when status is 'granted', otherwise null",
     ),
 
     # ── Battery (BESS) columns ───────────────────────────────────────────────

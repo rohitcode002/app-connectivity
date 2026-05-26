@@ -214,14 +214,19 @@ def extract_state(loc: Optional[str]) -> Optional[str]:
 
 # ── norm_num_ids ─────────────────────────────────────────────────────────────
 def norm_num_ids(v: Optional[str], strip_zeros: bool = False) -> Optional[str]:
-    """Normalise numeric application IDs (6+ digit numbers)."""
+    """Normalise numeric application ID (6+ digit number).
+
+    Returns only the FIRST matching ID — each ID column must hold
+    at most one single value.
+    """
     v = clean(v)
     if not v:
         return None
     ids = re.findall(r"\b\d{6,}\b", v)
     if not ids:
         return v
-    return ", ".join(i.lstrip("0") or "0" for i in ids) if strip_zeros else ", ".join(ids)
+    first = ids[0]
+    return (first.lstrip("0") or "0") if strip_zeros else first
 
 
 def norm_num_ids_strip(v: Optional[str]) -> Optional[str]:
@@ -645,7 +650,6 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         p["Name of Developers"]          = norm_dev(p.get("Name of Developers"))
         p["GNA/ST II Application ID"]    = norm_num_ids(raw_gna, strip_zeros=False)
         p["Application Quantum (MW)(ST II)"] = clean(p.get("Application Quantum (MW)(ST II)"))
-        p["Granted Quantum GNA/LTA(MW)"] = clean(p.get("Granted Quantum GNA/LTA(MW)"))
         p["Mode(Criteria for applying)"] = norm_mode_criteria(p.get("Mode(Criteria for applying)"))
         p["Nature of Applicant"]         = clean(p.get("Nature of Applicant"))
 
@@ -678,6 +682,14 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
 
         # ── Status ───────────────────────────────────────────────────────
         p["Status of application(Withdrawn / granted. Revoked.)"] = norm_status(raw_stat)
+
+        # ── Calculated: Granted Quantum ──────────────────────────────────
+        # If status is "granted" → copy Application Quantum; else empty.
+        norm_stat = p["Status of application(Withdrawn / granted. Revoked.)"]
+        if norm_stat and norm_stat.lower() == "granted":
+            p["Granted Quantum GNA/LTA(MW)"] = clean(p.get("Application Quantum (MW)(ST II)"))
+        else:
+            p["Granted Quantum GNA/LTA(MW)"] = None
 
         # ── PSP columns (multi-field derivation) ─────────────────────────
         # Build row context early so both PSP and Battery can use it
@@ -773,26 +785,16 @@ def _row_pdf_key(row: dict) -> str:
 
 
 def _merge_id_cell(existing: object, incoming: object) -> object:
-    """Append incoming IDs to an existing comma-separated ID cell."""
-    existing_clean = clean(existing)
-    incoming_clean = clean(incoming)
-    if not existing_clean:
-        return incoming
-    if not incoming_clean:
-        return existing
+    """Keep a single ID per cell — prefer the existing value.
 
-    ordered: list[str] = []
-    seen: set[str] = set()
-    for value in (existing_clean, incoming_clean):
-        ids = re.findall(r"\b\d{6,}\b", str(value))
-        candidates = ids or [str(value)]
-        for candidate in candidates:
-            key = candidate.lstrip("0") or "0"
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered.append(candidate)
-    return ", ".join(ordered)
+    Each ID column must hold at most one value. If the existing
+    (later) row already has an ID, keep it. Otherwise take the
+    incoming (earlier) row's ID.
+    """
+    existing_clean = clean(existing)
+    if existing_clean:
+        return existing
+    return incoming
 
 
 def _merge_into_later_row(current: dict, later: dict) -> None:
@@ -800,8 +802,7 @@ def _merge_into_later_row(current: dict, later: dict) -> None:
 
     Later rows are treated as the newer/updated copy. Existing later values are
     preserved, and only missing later cells are filled from the current row.
-    Application ID cells can contain comma-separated IDs, so duplicate rows keep
-    the union of GNA/LTA/5.2 IDs on the later row.
+    Each ID column keeps at most one value — the later row's ID takes precedence.
     """
     for col in _APPLICATION_ID_COLUMNS:
         merged_ids = _merge_id_cell(later.get(col), current.get(col))
