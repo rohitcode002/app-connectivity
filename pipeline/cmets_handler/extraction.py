@@ -271,7 +271,7 @@ def extract_pages(
     max_pages: int = -1,
     save_camelot_dumps: bool = False,
 ) -> list[dict]:
-    """Read page text from *pdf_path* using Camelot Markdown tables.
+    """Read page text from *pdf_path* using pdfplumber text + Camelot tables.
 
     Parameters
     ----------
@@ -286,13 +286,32 @@ def extract_pages(
     total = len(reader.pages)
     limit = total if max_pages == -1 else min(max_pages, total)
     label = "all" if max_pages == -1 else f"first {limit}"
-    print(f"  [A] {total} pages total — processing {label} with Camelot")
+    print(f"  [A] {total} pages total — processing {label} with pdfplumber + Camelot")
     if save_camelot_dumps:
         out_dir = _camelot_output_dir(pdf_path)
         print(f"      Camelot page dumps → {out_dir}")
+
+    pdfplumber_pages: list[str] = []
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages[:limit]:
+                pdfplumber_pages.append(page.extract_text() or "")
+    except Exception as exc:
+        print(f"      pdfplumber unavailable/failed ({exc}); falling back to Camelot text only")
+
     for i in range(limit):
         pnum = i + 1
         table_text, table_count, flavor = _render_camelot_page(pdf_path, pnum)
+        raw_text = pdfplumber_pages[i] if i < len(pdfplumber_pages) else ""
+        combined_parts = []
+        if raw_text.strip():
+            combined_parts.append(raw_text.strip())
+        if table_text.strip():
+            combined_parts.append(table_text.strip())
+        page_text = "\n\n".join(combined_parts)
+
         if save_camelot_dumps:
             saved_path = _save_camelot_page_text(pdf_path, pnum, table_text)
             print(
@@ -306,8 +325,8 @@ def extract_pages(
             )
         pages.append({
             "page_number": pnum,
-            "text": table_text,
-            "raw_text": table_text,
+            "text": page_text,
+            "raw_text": raw_text or page_text,
             "table_text": table_text,
         })
     return pages

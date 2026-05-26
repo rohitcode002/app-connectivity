@@ -65,6 +65,17 @@ def _infer_type(source_name: str, pdf_path: Path, pdf_type: str | None) -> str:
 
 def _resolve_source_dir(primary: Path, fallback: Path) -> Path:
     if primary.exists() and any(primary.rglob("*.pdf")):
+        alternate = primary
+        parts = list(primary.parts)
+        if "source_output" in parts:
+            idx = parts.index("source_output")
+            parts[idx] = "source_output1"
+            alternate = Path(*parts)
+        if alternate != primary and alternate.exists():
+            primary_count = sum(1 for p in primary.rglob("*.pdf") if p.is_file())
+            alternate_count = sum(1 for p in alternate.rglob("*.pdf") if p.is_file())
+            if alternate_count > primary_count:
+                return alternate
         return primary
     return fallback
 
