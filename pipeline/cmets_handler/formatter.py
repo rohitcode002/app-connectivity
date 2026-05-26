@@ -156,11 +156,13 @@ def _format_yes_no(value: Any) -> str | None:
 def _format_status(value: Any) -> str | None:
     text = _text(value).lower()
     if not text:
-        return None
-    if any(word in text for word in ("withdraw", "revoke", "cancel", "reject")):
+        return "Applied"
+    if "withdraw" in text:
         return "Withdrawn"
+    if any(word in text for word in ("revoke", "cancel", "reject")):
+        return "Revoked"
     if "grant" in text or "approved" in text:
-        return "Granted"
+        return "granted"
     return "Applied"
 
 

@@ -1,7 +1,7 @@
 """
 Status of application — prompt section
 =========================================
-Withdrawn / Granted / Applied.
+Withdrawn / granted / Revoked / Applied.
 """
 
 # ── Output key(s) for the LLM JSON response ─────────────────────────────────
@@ -16,10 +16,11 @@ VARIANTS = [
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
-Map the status wording to one of: Withdrawn, Granted, Applied.
-Use Granted when the application is granted/approved.
-Use Withdrawn when wording says withdrawn/revoked/cancelled/rejected.
-Use Applied for submitted, applied, pending, under process, or any active/non-final status."""
+Map the status wording to one of: Withdrawn, granted, Revoked, Applied.
+Use granted when the application is granted/approved.
+Use Withdrawn when wording says withdrawn.
+Use Revoked when wording says revoked/cancelled/rejected.
+Use Applied when no status is found, or for submitted, applied, pending, under process, or any active/non-final status."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
-JSON_EXAMPLE = '"Status of application(Withdrawn / granted. Revoked.)": "Granted"'
+JSON_EXAMPLE = '"Status of application(Withdrawn / granted. Revoked.)": "Applied"'

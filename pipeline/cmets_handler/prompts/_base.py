@@ -53,8 +53,8 @@ SKIP RULES — DO NOT extract rows if:
     If you detect ANY GNARE column, return {{"rows": []}}.
 - For "GNA Operationalization Date" look near SCoD/SCOD terms.
 - For "GNA Operationalization (Yes/No)" return null (computed in post-processing).
-- For "Status of application..." map wording to only: Withdrawn / Granted / Applied.
-  Treat revoked/cancelled/rejected as Withdrawn; treat pending/submitted/under process as Applied.
+- For "Status of application..." map wording to only: Withdrawn / granted / Revoked / Applied.
+  Treat revoked/cancelled/rejected as Revoked; treat missing status, pending/submitted/under process as Applied.
 - PSP values: fill only when pump storage / PSP wording is explicitly present.
 - Battery values: fill only when BESS / Battery wording is explicitly present.
 - "type" MUST be strictly one of these keywords: Solar, BESS, Wind, Solar+Wind, Solar+BESS

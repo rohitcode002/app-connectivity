@@ -165,12 +165,14 @@ def norm_status(v: Optional[str]) -> Optional[str]:
     """Normalise application status to canonical values."""
     v = clean(v)
     if not v:
-        return None
+        return "Applied"
     lower = v.lower()
-    if any(word in lower for word in ("withdraw", "revoke", "cancel", "reject")):
+    if "withdraw" in lower:
         return "Withdrawn"
+    if any(word in lower for word in ("revoke", "cancel", "reject")):
+        return "Revoked"
     if "grant" in lower or "approved" in lower:
-        return "Granted"
+        return "granted"
     return "Applied"
 
 
