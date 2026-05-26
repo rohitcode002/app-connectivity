@@ -264,74 +264,6 @@ def _backfill_nature_of_applicant(raw_rows: list[dict], page_text: str) -> list[
     return raw_rows
 
 
-# ── Sub-layer A: PDF page extraction ──────────────────────────────────────────
-
-def extract_pages(
-    pdf_path: str,
-    max_pages: int = -1,
-    save_camelot_dumps: bool = False,
-) -> list[dict]:
-    """Read page text from *pdf_path* using pdfplumber text + Camelot tables.
-
-    Parameters
-    ----------
-    max_pages : int
-        Maximum number of pages to process per PDF.
-        -1 means process all pages.
-
-    Returns a list of ``{"page_number": int, "text": str, "raw_text": str, "table_text": str}`` dicts.
-    """
-    pages = []
-    reader = PdfReader(pdf_path)
-    total = len(reader.pages)
-    limit = total if max_pages == -1 else min(max_pages, total)
-    label = "all" if max_pages == -1 else f"first {limit}"
-    print(f"  [A] {total} pages total — processing {label} with pdfplumber + Camelot")
-    if save_camelot_dumps:
-        out_dir = _camelot_output_dir(pdf_path)
-        print(f"      Camelot page dumps → {out_dir}")
-
-    pdfplumber_pages: list[str] = []
-    try:
-        import pdfplumber
-
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages[:limit]:
-                pdfplumber_pages.append(page.extract_text() or "")
-    except Exception as exc:
-        print(f"      pdfplumber unavailable/failed ({exc}); falling back to Camelot text only")
-
-    for i in range(limit):
-        pnum = i + 1
-        table_text, table_count, flavor = _render_camelot_page(pdf_path, pnum)
-        raw_text = pdfplumber_pages[i] if i < len(pdfplumber_pages) else ""
-        combined_parts = []
-        if raw_text.strip():
-            combined_parts.append(raw_text.strip())
-        if table_text.strip():
-            combined_parts.append(table_text.strip())
-        page_text = "\n\n".join(combined_parts)
-
-        if save_camelot_dumps:
-            saved_path = _save_camelot_page_text(pdf_path, pnum, table_text)
-            print(
-                f"      Page {pnum}/{total}: {table_count} table(s)"
-                f"{f' via {flavor}' if flavor else ''} → {saved_path.name}"
-            )
-        else:
-            print(
-                f"      Page {pnum}/{total}: {table_count} table(s)"
-                f"{f' via {flavor}' if flavor else ''}"
-            )
-        pages.append({
-            "page_number": pnum,
-            "text": page_text,
-            "raw_text": raw_text or page_text,
-            "table_text": table_text,
-        })
-    return pages
-
-
 # ── Conditional fields: only extract when detected in active_fields ───────────
 # Map: gate column name → list of LLM JSON keys to blank when the column is absent.
 # Add entries here for any column that should ONLY be extracted when its header
@@ -407,7 +339,7 @@ def llm_extract_rows(
         return []
 
 
-# ── Combined: run all sub-layers for one PDF ──────────────────────────────────
+# ── Combined: run all sub-layers for one PDF (page-at-a-time) ─────────────────
 
 def run_single_pdf(
     pdf_path: str,
@@ -416,18 +348,40 @@ def run_single_pdf(
     llm_script_path: Optional[str] = None,
     max_pages: int = -1,
 ) -> PipelineResult:
-    """Run sub-layers A→B→C for a single PDF and return PipelineResult."""
-    pages         = extract_pages(pdf_path, max_pages=max_pages, save_camelot_dumps=True)
-    results       = []
+    """Run sub-layers A→B→C for a single PDF and return PipelineResult.
+
+    Flow per page (sequential):
+        PDF → extract page N (Camelot) → save .txt → gate check → LLM extract
+    """
+    reader = PdfReader(pdf_path)
+    total  = len(reader.pages)
+    limit  = total if max_pages == -1 else min(max_pages, total)
+    label  = "all" if max_pages == -1 else f"first {limit}"
+    out_dir = _camelot_output_dir(pdf_path)
+
+    print(f"  [A] {total} pages total — processing {label} with Camelot")
+    print(f"      Camelot page dumps → {out_dir}")
+
+    results:       list[PageResult] = []
     pages_passed  = 0
     pages_skipped = 0
 
-    for page in pages:
-        pnum = page["page_number"]
-        text = page["text"]
-        raw_text = page.get("raw_text") or text
+    for i in range(limit):
+        pnum = i + 1
 
-        # Sub-layer B: regex gate
+        # ── Step 1: Extract page with Camelot ─────────────────────────────
+        table_text, table_count, flavor = _render_camelot_page(pdf_path, pnum)
+
+        # ── Step 2: Save .txt ─────────────────────────────────────────────
+        saved_path = _save_camelot_page_text(pdf_path, pnum, table_text)
+        print(
+            f"  [A] Page {pnum}/{total}: {table_count} table(s)"
+            f"{f' via {flavor}' if flavor else ''} → {saved_path.name}"
+        )
+
+        text = table_text
+
+        # ── Step 3: Gate check ────────────────────────────────────────────
         passed, active_fields = page_passes_gate(text)
         if not passed:
             print(f"  [B] Page {pnum:>3}: SKIP")
@@ -438,9 +392,9 @@ def run_single_pdf(
         print(f"  [B] Page {pnum:>3}: PASS ✓  fields={active_fields}")
         pages_passed += 1
 
-        # Sub-layer C: LLM extraction
+        # ── Step 4: LLM extraction ────────────────────────────────────────
         print(f"  [C] Page {pnum} ({len(text)} chars) → LLM …", end="", flush=True)
-        raw_rows   = llm_extract_rows(
+        raw_rows = llm_extract_rows(
             text,
             active_fields,
             vm_mode,
@@ -451,7 +405,7 @@ def run_single_pdf(
         )
         print(f" {len(raw_rows)} raw")
 
-        # Blank out conditional fields not detected on this page
+        # Post-process rows
         raw_rows = _blank_conditional_fields(raw_rows, active_fields)
         raw_rows = _backfill_nature_of_applicant(raw_rows, text)
         raw_rows = route_applications_under_52_rows(raw_rows, text)
@@ -461,9 +415,7 @@ def run_single_pdf(
         print(f"         → {len(normalized)} normalised rows")
 
         # Sub-layer V: Contextual voltage extraction (per row)
-        # Primary: LLM-provided Voltage field + row cell scan (substation, location…)
-        # Fallback: page-level voltage if row gives nothing
-        page_voltage = extract_voltage_from_page(raw_text)
+        page_voltage = extract_voltage_from_page(text)
         injected: list[MappedRow] = []
         for row in normalized:
             d = row.model_dump(by_alias=True)
@@ -479,7 +431,7 @@ def run_single_pdf(
 
     return PipelineResult(
         pdf_path=pdf_path,
-        total_pages_extracted=len(pages),
+        total_pages_extracted=limit,
         pages_passed_gate=pages_passed,
         pages_skipped=pages_skipped,
         total_rows=sum(r.rows_found for r in results),
