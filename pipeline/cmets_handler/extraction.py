@@ -417,7 +417,7 @@ def run_single_pdf(
     max_pages: int = -1,
 ) -> PipelineResult:
     """Run sub-layers A→B→C for a single PDF and return PipelineResult."""
-    pages         = extract_pages(pdf_path, max_pages=max_pages, save_camelot_dumps=False)
+    pages         = extract_pages(pdf_path, max_pages=max_pages, save_camelot_dumps=True)
     results       = []
     pages_passed  = 0
     pages_skipped = 0

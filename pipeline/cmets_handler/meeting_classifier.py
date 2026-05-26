@@ -91,7 +91,12 @@ class MeetingMeta:
         }
 
     def as_first_page_dict(self) -> dict:
-        """Return physical page-1 evidence for the per-PDF JSON cache."""
+        """Return physical page-1 evidence for the per-PDF JSON cache.
+
+        NOTE: image_base64 is intentionally excluded to keep cache JSON
+        files small.  The base64 is still available on the dataclass at
+        runtime for OCR / diagnostics if needed.
+        """
         return {
             "page_number": 1,
             "text_source": self.first_page_text_source or "empty",
@@ -100,8 +105,6 @@ class MeetingMeta:
             "ocr_available": self.first_page_ocr_available,
             "ocr_error": self.first_page_ocr_error or None,
             "ocr_command": self.first_page_ocr_command or None,
-            "image_mime_type": self.first_page_image_mime_type or None,
-            "image_base64": self.first_page_image_base64 or None,
         }
 
     def as_diagnostics_dict(self) -> dict:
