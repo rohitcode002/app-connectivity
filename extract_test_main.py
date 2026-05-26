@@ -1,8 +1,8 @@
 """
-PDF Data Extractor — raw text output with Markdown tables
-==========================================================
+PDF Data Extractor — page-wise raw text and Markdown tables
+===========================================================
 Extracts content from a PDF per page using two methods:
-  1. pdfplumber  — text + tables rendered as Markdown
+  1. pdfplumber  — raw text only
   2. camelot     — tables rendered as Markdown
 
 Output structure
@@ -116,36 +116,19 @@ def extract_with_pdfplumber(pdf_path: str, root_dir: str) -> None:
 
     with pdfplumber.open(pdf_path) as pdf:
         total = len(pdf.pages)
-        print(f"\n[pdfplumber] {total} page(s) found — saving to: {dest}")
+        print(f"\n[pdfplumber] {total} page(s) found — saving raw page text to: {dest}")
 
         for i, page in enumerate(pdf.pages, start=1):
             label = page_label(i, total)
-            lines = []
-
-            # ── text ──────────────────────────────────────────────────────────
             text = page.extract_text() or ""
-            lines.append(f"{'='*60}")
-            lines.append(f"PAGE {i} — TEXT")
-            lines.append(f"{'='*60}")
-            lines.append(text if text else "(no text found)")
-
-            # ── tables as Markdown ────────────────────────────────────────────
-            tables = page.extract_tables() or []
-            if tables:
-                for t_idx, table in enumerate(tables, start=1):
-                    lines.append(f"\n{'-'*60}")
-                    lines.append(f"PAGE {i} — TABLE {t_idx}")
-                    lines.append(f"{'-'*60}")
-                    lines.append(rows_to_markdown(table))
-            else:
-                lines.append("\n(no tables found on this page)")
+            content = text if text else "(no text found)"
 
             out_file = os.path.join(dest, f"page_{label}.txt")
             with open(out_file, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
+                f.write(content)
 
             print(f"  Page {i}/{total} -> {os.path.basename(out_file)}  "
-                  f"({len(text)} text chars, {len(tables)} table(s))")
+                  f"({len(text)} text chars)")
 
     print("[pdfplumber] Done.\n")
 
@@ -226,7 +209,7 @@ def main() -> None:
     root_dir = get_output_root(pdf_path)
 
     print("=" * 60)
-    print("  PDF Extractor  (raw text + Markdown tables)")
+    print("  PDF Extractor  (pdfplumber raw text + Camelot Markdown tables)")
     print(f"  Input          : {pdf_path}")
     print(f"  pdfplumber  -> : {root_dir}/pdfplumber/")
     print(f"  camelot     -> : {root_dir}/camelot/")

@@ -22,7 +22,12 @@ from pipeline.shared_utils import (
     ids_from_cell,
     lookup_first,
     safe_float,
-    classify_project_type
+    safe_str,
+    classify_project_type,
+    components_from_type_keywords,
+    components_to_type,
+    normalize_type,
+    parse_type_capacity,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -71,6 +76,129 @@ _OVERLAPPING_UPDATES: list[tuple[str, list[str]]] = [
     ("region",                  ["Region"]),
 ]
 
+_TYPE_TO_COMPONENT: dict[str, str] = {
+    "solar": "Solar",
+    "wind": "Wind",
+    "ess": "BESS",
+    "hydro": "Hydro",
+}
+
+
+def _row_components(row: pd.Series, type_col: str | None) -> tuple[set[str], dict[str, float]]:
+    """Read CMETS components from Type text and existing capacity columns."""
+    type_text = row.get(type_col) if type_col else ""
+    capacities = parse_type_capacity(safe_str(type_text))
+    components = set(capacities) | components_from_type_keywords(type_text)
+
+    column_to_component = {
+        "Installed/Break-up Capacity (MW) Solar": "Solar",
+        "Installed capacity (MW) solar": "Solar",
+        "Installed/Break-up Capacity (MW) Wind": "Wind",
+        "Installed capacity (MW) wind": "Wind",
+        "Installed/Break-up Capacity (MW) Hydro": "Hydro",
+        "Installed capacity (MW) hydro": "Hydro",
+        "Battery MWh": "BESS",
+        "Battery Injection (MW)": "BESS",
+        "Battery Drawl (MW)": "BESS",
+        "Installed capacity (MW) ess": "BESS",
+        "PSP MWh": "PSP",
+        "PSP Injection (MW)": "PSP",
+        "PSP Drawl (MW)": "PSP",
+    }
+    for col_name, component in column_to_component.items():
+        if safe_float(row.get(col_name)) > 0:
+            components.add(component)
+            capacities[component] = max(capacities.get(component, 0.0), safe_float(row.get(col_name)))
+
+    return components, capacities
+
+
+def _effectiveness_components(eff: dict) -> tuple[set[str], dict[str, float]]:
+    """Map RE-effectiveness project text and MW columns to canonical components."""
+    components = components_from_type_keywords(eff.get("type_of_project"))
+    capacities: dict[str, float] = {}
+
+    for eff_key, component in (
+        ("solar_mw", "Solar"),
+        ("wind_mw", "Wind"),
+        ("ess_mw", "BESS"),
+        ("hydro_mw", "Hydro"),
+    ):
+        val = safe_float(eff.get(eff_key))
+        if val <= 0:
+            continue
+        if eff_key == "hydro_mw" and any(c == "PSP" for c in components):
+            component = "PSP"
+        components.add(component)
+        capacities[component] = capacities.get(component, 0.0) + val
+
+    cats = classify_project_type(eff.get("type_of_project") or "")
+    for cat in cats:
+        component = _TYPE_TO_COMPONENT.get(cat)
+        if component:
+            components.add(component)
+
+    return components, capacities
+
+
+def _has_detailed_cmets_breakup(components: set[str], capacities: dict[str, float]) -> bool:
+    """True when CMETS already provides usable component detail."""
+    if any(value > 0 for value in capacities.values()):
+        return True
+    specific = components - {"Hybrid"}
+    return bool(specific)
+
+
+def merge_re_type_and_capacity(row: pd.Series, eff: dict, type_col: str | None) -> str | None:
+    """Merge CMETS and RE-effectiveness component evidence into final Type.
+
+    CMETS component breakups win when present. When CMETS is generic or blank,
+    RE-effectiveness project type/capacities fill the missing components. The
+    combined component set is then passed through ``components_to_type``.
+    """
+    cmets_components, cmets_caps = _row_components(row, type_col)
+    eff_components, eff_caps = _effectiveness_components(eff)
+
+    if _has_detailed_cmets_breakup(cmets_components, cmets_caps):
+        components = set(cmets_components)
+        if eff_components - components:
+            components |= eff_components
+    else:
+        components = set(cmets_components) | eff_components
+
+    nature = safe_str(row.get("Nature of Applicant")).lower()
+    merged_caps = {**eff_caps, **cmets_caps}
+    has_solar_wind = merged_caps.get("Solar", 0.0) > 0 and merged_caps.get("Wind", 0.0) > 0
+    if "hybrid" in nature and has_solar_wind:
+        return "Hybrid"
+
+    return components_to_type(components) or normalize_type(row.get(type_col) if type_col else None)
+
+
+def apply_known_re_row_normalizations(
+    row: pd.Series,
+    type_value: str | None,
+    type_col: str | None,
+) -> str | None:
+    """Hardcoded fixes for RE rows whose original PDF formatting is broken."""
+    ids = " ".join(
+        safe_str(row.get(col))
+        for col in (
+            "GNA/ST II Application ID",
+            "LTA Application ID",
+            "Application ID under Enhancement 5.2 or revision",
+        )
+    )
+    if not re.search(r"\b(?:2200000305|2200000319)\b", ids):
+        return type_value
+
+    components, capacities = _row_components(row, type_col)
+    has_solar = capacities.get("Solar", 0.0) > 0
+    has_bess = capacities.get("BESS", 0.0) > 0
+    if has_solar and has_bess:
+        return "Solar+BESS"
+    return type_value
+
 
 # ── Main merge function ──────────────────────────────────────────────────────
 
@@ -90,6 +218,7 @@ def merge_rows(df: pd.DataFrame, lookup: dict) -> tuple[pd.DataFrame, dict]:
     col_subst    = find_col(df, "substaion", "Substation")
     col_state    = find_col(df, "State")
     col_quantum  = find_col(df, "Application Quantum (MW)(ST II)")
+    col_type     = find_col(df, "Type")
 
     matched_gna = matched_lta = matched_52 = unmatched = 0
 
@@ -142,6 +271,13 @@ def merge_rows(df: pd.DataFrame, lookup: dict) -> tuple[pd.DataFrame, dict]:
         for eff_key, col_name in _EFF_FIELD_TO_COL:
             if _is_valid(eff.get(eff_key)):
                 df.at[idx, col_name] = eff[eff_key]
+
+        # ── Type from CMETS component breakup + RE-effectiveness lookup ──
+        if col_type:
+            current_row = df.loc[idx]
+            merged_type = merge_re_type_and_capacity(current_row, eff, col_type)
+            merged_type = apply_known_re_row_normalizations(current_row, merged_type, col_type)
+            df.at[idx, col_type] = merged_type
 
         # ── Hybrid total ──────────────────────────────────────────────
         cats = classify_project_type(eff.get("type_of_project") or "")

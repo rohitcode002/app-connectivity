@@ -21,6 +21,7 @@ from pipeline.excel_utils import (
 )
 from pipeline.cmets_handler.normalization import INDIA_STATES_UTS, clean, norm_substation
 from pipeline.cmets_handler.normalization import extract_date, gna_yes_no
+from pipeline.cmets_handler.normalization import norm_type, parse_type_capacity
 
 
 CAPACITY_COLUMNS = [
@@ -120,9 +121,8 @@ def _format_status(value: Any) -> str | None:
     return "Applied"
 
 
-_TYPE_VALUE_RE = re.compile(
-    r"(solar|wind|bess|ess|hydro|hybrid|psp|pump\s*storage)"
-    r"\s*\(\s*([\d,.]+)",
+_HYBRID_VALUE_RE = re.compile(
+    r"\b(?:hybrid|solar\s*\+\s*wind)\s*\(\s*([\d,.]+)",
     re.IGNORECASE,
 )
 
@@ -136,49 +136,16 @@ def _parse_type(value: Any) -> tuple[str | None, dict[str, int | float]]:
     if not text:
         return None, {}
 
-    lower = text.lower()
-    found: set[str] = set()
+    component_caps = parse_type_capacity(text)
     capacities = {"solar": 0.0, "wind": 0.0, "hybrid": 0.0, "hydro": 0.0}
+    capacities["solar"] = component_caps.get("Solar", 0.0)
+    capacities["wind"] = component_caps.get("Wind", 0.0)
+    capacities["hydro"] = component_caps.get("Hydro", 0.0)
 
-    for match in _TYPE_VALUE_RE.finditer(text):
-        raw_type = match.group(1).lower().strip()
-        mw_value = float(match.group(2).replace(",", ""))
-        if raw_type in {"bess", "ess"}:
-            found.add("BESS")
-        elif raw_type == "solar":
-            found.add("Solar")
-            capacities["solar"] += mw_value
-        elif raw_type == "wind":
-            found.add("Wind")
-            capacities["wind"] += mw_value
-        elif raw_type in {"hydro", "psp", "pump storage"}:
-            found.add("Hydro")
-            capacities["hydro"] += mw_value
-        elif raw_type == "hybrid":
-            found.add("Hybrid")
-            capacities["hybrid"] += mw_value
+    for match in _HYBRID_VALUE_RE.finditer(text):
+        capacities["hybrid"] += float(match.group(1).replace(",", ""))
 
-    keyword_map = [
-        ("solar", "Solar"),
-        ("wind", "Wind"),
-        ("bess", "BESS"),
-        ("ess", "BESS"),
-        ("hydro", "Hydro"),
-        ("psp", "Hydro"),
-        ("pump storage", "Hydro"),
-        ("hybrid", "Hybrid"),
-    ]
-    for keyword, label in keyword_map:
-        if keyword in lower:
-            found.add(label)
-
-    if {"Solar", "Wind"}.issubset(found):
-        found.discard("Solar")
-        found.discard("Wind")
-        found.add("Hybrid")
-
-    order = ["Solar", "Wind", "Hybrid", "Hydro", "BESS"]
-    formatted_type = "+".join(label for label in order if label in found) or None
+    formatted_type = norm_type(text)
     formatted_caps = {
         "Installed/Break-up Capacity (MW) Solar": _format_number(capacities["solar"]),
         "Installed/Break-up Capacity (MW) Wind": _format_number(capacities["wind"]),

@@ -16,11 +16,12 @@ VARIANTS = [
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
-STRICTLY use ONLY these keywords: Solar, BESS, Wind, Solar+Wind, Solar+BESS.
-Include the associated MW value in parentheses if present.
+Extract only component type/capacity breakups from the source cell/table.
+Use only these component labels: Solar, Wind, Hydro, BESS, PSP.
+Include the associated MW value in parentheses when present.
 Do NOT include any other words, sentences, or descriptions.
-Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar+Wind (500)",
-"Solar+BESS (100)", "BESS (50)"."""
+Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)",
+"Solar (100) + BESS (50)", "Hydro (100) + BESS (25)", "PSP"."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
 JSON_EXAMPLE = '"type": "Solar (300)"'

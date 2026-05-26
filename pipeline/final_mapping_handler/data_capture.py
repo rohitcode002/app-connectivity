@@ -28,7 +28,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from pipeline.shared_utils import find_col, safe_str
+from pipeline.shared_utils import (
+    components_from_type_keywords,
+    components_to_type,
+    find_col,
+    safe_float,
+    safe_str,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +89,8 @@ FINAL_COLUMN_MAP: list[tuple[str, list[str]]] = [
     ("Application Quantum (MW)(ST II)",
      ["Application Quantum (MW)(ST II)"]),
 
-    ("Granted Quantum GNA/LTA(MW)",
-     ["Granted Quantum GNA/LTA(MW)", "Granted  Quantum GNA/LTA(MW)"]),
+    ("Granted  Quantum GNA/LTA(MW)",
+     []),
 
     # Installed/Break-up Capacity (MW) sub-columns
     ("Installed/Break-up Capacity (MW) Solar",
@@ -230,6 +236,95 @@ def _resolve_bay_no(df: pd.DataFrame) -> pd.Series:
     return result
 
 
+def _resolve_granted_quantum(df: pd.DataFrame) -> pd.Series:
+    """Calculate granted quantum from status and application quantum.
+
+    The final Data to be Captured sheet must not copy this value from CMETS or
+    any upstream extracted column.  It is filled only when the application status
+    is exactly granted after trimming/case-folding.
+    """
+    status_col = find_col(df, "Status of application(Withdrawn / granted. Revoked.)")
+    quantum_col = find_col(df, "Application Quantum (MW)(ST II)")
+
+    result = pd.Series([None] * len(df), index=df.index)
+    if status_col is None or quantum_col is None:
+        return result
+
+    for idx, row in df.iterrows():
+        status = safe_str(row.get(status_col)).lower()
+        if status == "granted":
+            result.at[idx] = row.get(quantum_col)
+
+    return result
+
+
+def _resolve_type(df: pd.DataFrame) -> pd.Series:
+    """Recalculate final Type from CMETS + RE-effectiveness capacity evidence."""
+    type_col = find_col(df, "Type")
+    nature_col = find_col(df, "Nature of Applicant")
+
+    capacity_cols = {
+        "Solar": [
+            "Installed/Break-up Capacity (MW) Solar",
+            "Installed capacity (MW) solar",
+        ],
+        "Wind": [
+            "Installed/Break-up Capacity (MW) Wind",
+            "Installed capacity (MW) wind",
+        ],
+        "Hydro": [
+            "Installed/Break-up Capacity (MW) Hydro",
+            "Installed capacity (MW) hydro",
+        ],
+        "BESS": [
+            "Battery MWh",
+            "Battery Injection (MW)",
+            "Battery Drawl (MW)",
+            "Installed capacity (MW) ess",
+        ],
+        "PSP": [
+            "PSP MWh",
+            "PSP Injection (MW)",
+            "PSP Drawl (MW)",
+        ],
+    }
+
+    id_cols = [
+        find_col(df, "GNA/ST II Application ID"),
+        find_col(df, "LTA Application ID"),
+        find_col(df, "Application ID under Enhancement 5.2 or revision"),
+    ]
+
+    result = pd.Series([None] * len(df), index=df.index)
+    for idx, row in df.iterrows():
+        components = components_from_type_keywords(row.get(type_col)) if type_col else set()
+        capacity_components: set[str] = set()
+
+        for component, candidates in capacity_cols.items():
+            for candidate in candidates:
+                col = find_col(df, candidate)
+                if col and safe_float(row.get(col)) > 0:
+                    components.add(component)
+                    capacity_components.add(component)
+                    break
+
+        nature = safe_str(row.get(nature_col)).lower() if nature_col else ""
+        has_solar_wind = {"Solar", "Wind"}.issubset(capacity_components)
+        if "hybrid" in nature and has_solar_wind:
+            result.at[idx] = "Hybrid"
+            continue
+
+        ids = " ".join(safe_str(row.get(col)) for col in id_cols if col)
+        if any(app_id in ids for app_id in ("2200000305", "2200000319")):
+            if {"Solar", "BESS"}.issubset(capacity_components):
+                result.at[idx] = "Solar+BESS"
+                continue
+
+        result.at[idx] = components_to_type(components)
+
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PUBLIC API
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -282,6 +377,18 @@ def generate_data_to_be_captured(
         # Special handling for Bay No
         if final_name == "Bay No":
             output_data[final_name] = _resolve_bay_no(df)
+            mapped_cols.append(final_name)
+            continue
+
+        # Recalculate from final CMETS + RE-effectiveness component evidence.
+        if final_name == "Type":
+            output_data[final_name] = _resolve_type(df)
+            mapped_cols.append(final_name)
+            continue
+
+        # Calculated from status + application quantum, never extracted/copied.
+        if final_name == "Granted  Quantum GNA/LTA(MW)":
+            output_data[final_name] = _resolve_granted_quantum(df)
             mapped_cols.append(final_name)
             continue
 

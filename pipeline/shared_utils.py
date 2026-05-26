@@ -84,3 +84,130 @@ def classify_project_type(type_str: Optional[str]) -> set[str]:
     if "hybrid" in text: cats.add("hybrid")
 
     return cats
+
+
+_COMPONENT_CANON: dict[str, str] = {
+    "solar": "Solar",
+    "wind": "Wind",
+    "bess": "BESS",
+    "ess": "BESS",
+    "battery": "BESS",
+    "battery energy storage": "BESS",
+    "hydro": "Hydro",
+    "hydel": "Hydro",
+    "psp": "PSP",
+    "pump storage": "PSP",
+    "pumped storage": "PSP",
+}
+
+_COMPONENT_LABEL_RE = re.compile(
+    r"battery\s+energy\s+storage|pump(?:ed)?\s+storage|solar|wind|bess|ess|"
+    r"battery|hydro|hydel|psp",
+    re.IGNORECASE,
+)
+_NUMBER_RE = r"(\d+(?:,\d{3})*(?:\.\d+)?)"
+
+
+def _component_label(raw: str) -> str | None:
+    key = re.sub(r"\s+", " ", raw.lower()).strip()
+    return _COMPONENT_CANON.get(key)
+
+
+def _capacity_value(raw: str) -> float:
+    try:
+        return float(str(raw).replace(",", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def parse_type_capacity(v: Optional[str]) -> dict[str, float]:
+    """Parse component MW breakups from a CMETS Type/capacity cell."""
+    text = safe_str(v)
+    if not text:
+        return {}
+
+    buckets: dict[str, float] = {}
+
+    def add(raw_label: str, raw_value: str) -> None:
+        component = _component_label(raw_label)
+        value = _capacity_value(raw_value)
+        if component and value > 0:
+            buckets[component] = buckets.get(component, 0.0) + value
+
+    label_pat = _COMPONENT_LABEL_RE.pattern
+    explicit = re.compile(
+        rf"\b({label_pat})\b\s*(?:[:\-–—]|\()\s*{_NUMBER_RE}\s*(?:MW)?\)?",
+        re.IGNORECASE,
+    )
+    trailing = re.compile(
+        rf"{_NUMBER_RE}\s*MW\s*\(\s*({label_pat})\s*\)",
+        re.IGNORECASE,
+    )
+    legacy = re.compile(
+        rf"{_NUMBER_RE}\s*\(\s*({label_pat})\s*\)",
+        re.IGNORECASE,
+    )
+
+    for match in explicit.finditer(text):
+        add(match.group(1), match.group(2))
+    for match in trailing.finditer(text):
+        add(match.group(2), match.group(1))
+    for match in legacy.finditer(text):
+        add(match.group(2), match.group(1))
+
+    return buckets
+
+
+def components_from_type_keywords(v: Optional[str]) -> set[str]:
+    """Detect canonical components from Type/project-type wording."""
+    text = safe_str(v)
+    if not text:
+        return set()
+
+    components: set[str] = set()
+    for match in _COMPONENT_LABEL_RE.finditer(text):
+        component = _component_label(match.group(0))
+        if component:
+            components.add(component)
+
+    if re.search(r"\bhybrid\b", text, re.IGNORECASE):
+        components.update({"Solar", "Wind"})
+
+    return components
+
+
+def components_to_type(components: set[str] | list[str] | tuple[str, ...] | dict[str, float]) -> Optional[str]:
+    """Convert parsed components to the canonical Type string."""
+    if isinstance(components, dict):
+        component_set = {name for name, value in components.items() if _capacity_value(value) > 0}
+    else:
+        component_set = {str(name) for name in components if str(name)}
+
+    if not component_set:
+        return None
+    if {"Solar", "Wind", "BESS"}.issubset(component_set):
+        return "Hybrid+BESS"
+    if {"Solar", "Wind"}.issubset(component_set):
+        return "Hybrid"
+    if component_set == {"Solar", "BESS"}:
+        return "Solar+BESS"
+    if component_set == {"Wind", "BESS"}:
+        return "Wind+BESS"
+    if component_set == {"Hydro", "BESS"}:
+        return "Hydro+BESS"
+    if component_set == {"PSP"}:
+        return "PSP"
+    if len(component_set) == 1:
+        return next(iter(component_set))
+
+    order = ["Solar", "Wind", "Hydro", "PSP", "BESS"]
+    return "+".join(component for component in order if component in component_set)
+
+
+def normalize_type(v: Optional[str]) -> Optional[str]:
+    """Normalize a Type text value through component parsing."""
+    text = safe_str(v)
+    if not text:
+        return None
+    components = set(parse_type_capacity(text)) | components_from_type_keywords(text)
+    return components_to_type(components)
