@@ -19,7 +19,7 @@ from pipeline.excel_utils import (
     _autosize_columns,
     _get_openpyxl,
 )
-from pipeline.cmets_handler.normalization import INDIA_STATES_UTS, clean
+from pipeline.cmets_handler.normalization import INDIA_STATES_UTS, clean, norm_substation
 from pipeline.cmets_handler.normalization import extract_date, gna_yes_no
 
 
@@ -104,15 +104,7 @@ def _format_region(*values: Any) -> str | None:
 
 
 def _format_substation(value: Any) -> str | None:
-    text = _text(value)
-    if not text:
-        return None
-    text = re.sub(r"\b\d{2,4}\s*k\s*v\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\b\d{2,4}\s*kv\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s{2,}", " ", text)
-    text = re.sub(r"\s+([,;)])", r"\1", text)
-    text = re.sub(r"([(,;])\s+", r"\1", text)
-    return text.strip(" -;,") or None
+    return norm_substation(_text(value))
 
 
 def _format_status(value: Any) -> str | None:

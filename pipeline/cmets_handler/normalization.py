@@ -52,6 +52,150 @@ def clean(v: Optional[str]) -> Optional[str]:
     return None if v.lower() in {"null", "none", "na", "n/a", "-", "--"} else (v or None)
 
 
+_ROMAN_VALUES = {
+    "i": "I",
+    "ii": "II",
+    "iii": "III",
+    "iv": "IV",
+    "v": "V",
+    "vi": "VI",
+    "vii": "VII",
+    "viii": "VIII",
+    "ix": "IX",
+    "x": "X",
+}
+
+_SUBSTATION_NOISE_RE = re.compile(
+    r"\b("
+    r"schedule|commissioning|implementation|informed|applicant|developer|"
+    r"connectivity|granted|grant|generation|generating|injection|quantum|"
+    r"remarks?|deliberation|agenda|minutes?|application|applied|route|scope"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_STATION_MARKER_RE = re.compile(
+    r"(?:\s*\(?\b(?:PS|SS|GSS|S/S|S\.S\.|S\s*/\s*S)\b\.?\)?)+\s*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_station_roman(text: str) -> str:
+    """Upper-case roman station suffixes while leaving normal words alone."""
+    def repl(match: re.Match) -> str:
+        prefix, roman = match.groups()
+        return f"{prefix}{_ROMAN_VALUES.get(roman.lower(), roman.upper())}"
+
+    return re.sub(r"(-\s*)(i{1,3}|iv|v|vi{0,3}|ix|x)\b", repl, text, flags=re.IGNORECASE)
+
+
+def _strip_station_markers(text: str) -> str:
+    previous = None
+    while previous != text:
+        previous = text
+        text = _STATION_MARKER_RE.sub("", text).strip()
+    return text
+
+
+def _looks_like_station_name(text: str) -> bool:
+    if not text or not re.search(r"[A-Za-z]", text):
+        return False
+    lowered = text.lower().strip()
+    if lowered in {"hvdc", "pg", "pgcil", "sec", "section"}:
+        return False
+    if _SUBSTATION_NOISE_RE.search(text) and not re.search(r"\b(?:bay|bays)\s+at\b|\bpooling\s+station\b", text, re.IGNORECASE):
+        return False
+    return True
+
+
+def _station_specificity(text: str) -> int:
+    score = 0
+    if re.search(r"-\s*(?:i{1,3}|iv|v|vi{0,3}|ix|x|\d+)\b", text, re.IGNORECASE):
+        score += 4
+    if re.search(r"\b(?:PS|SS|GSS|S/S|S\.S\.|pooling\s+station)\b", text, re.IGNORECASE):
+        score += 2
+    if re.search(r"\b(?:HVDC|PG|PGCIL|BBMB)\b", text, re.IGNORECASE):
+        score += 1
+    return score
+
+
+def _add_default_station_index(text: str) -> str:
+    if re.search(r"-\s*(?:[IVX]+|\d+)\b", text, re.IGNORECASE):
+        return text
+    if re.search(r"[(),;:]|\b(?:PG|PGCIL|BBMB|HVDC)\b", text, re.IGNORECASE):
+        return text
+    if not re.fullmatch(r"[A-Za-z][A-Za-z .'-]*", text):
+        return text
+    return f"{text}-I"
+
+
+def _clean_substation_candidate(text: str, *, add_default_index: bool = True) -> Optional[str]:
+    text = clean(text)
+    if not text:
+        return None
+
+    text = re.sub(r"\b\d{2,4}\s*k\s*v\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b\d{2,4}\s*kv\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"[\u2010-\u2015]", "-", text)
+    text = re.sub(r"\s*-\s*", "-", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\bBays?\s+at\s+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(?:nearest\s+)?pooling\s+station\s*(?:at|is|:|-)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.split(r"\s*/\s*(?!\s*S\b)", text, maxsplit=1)[0]
+    text = re.sub(r"\((?:sec(?:tion)?|ckt|circuit)[^)]*\)", "", text, flags=re.IGNORECASE)
+    text = _strip_station_markers(text)
+    text = _normalize_station_roman(text)
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\s+([,;)])", r"\1", text)
+    text = re.sub(r"([(,;])\s+", r"\1", text)
+    text = text.strip(" -;,")
+
+    if not _looks_like_station_name(text):
+        return None
+    if add_default_index:
+        text = _add_default_station_index(text)
+    return text or None
+
+
+def norm_substation(v: Optional[str]) -> Optional[str]:
+    """Normalise CMETS substation names for matching and final output."""
+    raw = clean(v)
+    if not raw:
+        return None
+
+    parenthetical_candidates = [
+        candidate
+        for candidate in re.findall(r"\(([^()]*)\)", raw)
+        if _looks_like_station_name(candidate)
+    ]
+    outer = re.sub(r"\([^()]*\)", " ", raw)
+    best_raw = raw
+    best_score = _station_specificity(outer)
+
+    for candidate in parenthetical_candidates:
+        score = _station_specificity(candidate)
+        if score > best_score:
+            best_raw = candidate
+            best_score = score
+
+    # Sentence fragments sometimes contain a useful "bay at <station>" tail.
+    tail_match = re.search(
+        r"\b(?:bay|bays)\s+at\s+([A-Za-z][A-Za-z .'-]*(?:-\s*(?:[IVX]+|\d+))?)",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if tail_match and best_raw == raw:
+        best_raw = tail_match.group(1)
+
+    cleaned = _clean_substation_candidate(best_raw)
+    if cleaned:
+        return cleaned
+
+    if best_raw != outer:
+        return _clean_substation_candidate(outer)
+    return None
+
+
 # ── extract_state ────────────────────────────────────────────────────────────
 def extract_state(loc: Optional[str]) -> Optional[str]:
     """Derive Indian state/UT name from Project Location text."""
@@ -345,6 +489,7 @@ NORM_FUNCTIONS: dict[str, callable] = {
     "extract_date":          extract_date,
     "gna_yes_no":            gna_yes_no,
     "norm_status":           norm_status,
+    "norm_substation":       norm_substation,
     "norm_dev":              norm_dev,
     "norm_mode_criteria":    norm_mode_criteria,
     "norm_type":             norm_type,
@@ -460,7 +605,7 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         raw_bat_drw = p.get("Battery Drawl (MW)")
 
         # ── Simple single-column normalisations ──────────────────────────
-        p["Substation"]                  = clean(p.get("Substation"))
+        p["Substation"]                  = norm_substation(p.get("Substation"))
         p["Project Location"]            = clean(p.get("Project Location"))
         p["Name of Developers"]          = norm_dev(p.get("Name of Developers"))
         p["GNA/ST II Application ID"]    = norm_num_ids(raw_gna, strip_zeros=False)

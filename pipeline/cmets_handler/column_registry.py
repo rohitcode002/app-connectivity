@@ -98,7 +98,7 @@ COLUMN_DEFS: list[ColumnDef] = [
             "Connectivity Injection Point",
             "Sub-station", "Substation",
         ],
-        norm_func="clean",
+        norm_func="norm_substation",
         description="Substation / connectivity location name (e.g. Aligarh (PG), Bhadla-V)",
     ),
 
