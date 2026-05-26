@@ -1,0 +1,70 @@
+Sl. No. Name of Substation Substation Coordinates Region Transformation Capacity (MVA) RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+(Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+ISTS substation may be refered) Injection
+Planned Existing Under 220kV 400kV 220kV* 400kV* 220kV 400kV
+Implementation
+Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins
+Quantum (MW) Quantum Available (MW) Available (MW)
+(MW)
+31 Nagpur S/s Corner-1: 20°48'46.61"N, 78°57'31.24"E; WR 6x1500MVA, 1 900 Chhindwara Plus Developers Ltd. (CPDL)
+Corner-2: 20°48'2.52"N, 78°57'29.08"E; 765/400kV
+Corner-3: 20°48'7.66"N, 78°56'56.58"E;
+Corner-4: 20°48'48.22"N, 78°56'57.08"E.
+900
+32 Morena PS (South of Sabalgarh) Corner-1: 25°54'56.06"N, 77°29'35.60"E; WR 3x1500MVA, 1 300 JIRE Green Energy Project One Ltd. 1 880 Greenko RJ01 IREP Private Limited
+Corner-2: 25°55'8.07"N, 77°30'0.075"E; 765/400kV &
+2 400 SUNSURE SOLARPARK RJ ONE PRIVATE LIMITED 2
+Corner-3: 25°54'38.99"N, 77°30'15.42"E; 2x500MVA,
+Corner-4: 25°54'28.31"N, 77°29'53.90"E. 400/220kV
+3 250 Waaree Forever Energies Private Limited 3
+4
+950 880
+33 400/230 kV Tuticorin-II S/s 9°3'02.1'' N 77°55'31.6''E SR 5x500 MVA, 400/230 1x500MVA, 222 & 223 250 Mytrah Energy (India) Private Limited 222 & 223 10 1 2 * Agreed for grant
+KV 400/230kV
+40 JSW Green Energy One Ltd.*
+205 249.9 Green Infra Renewable Energy Limited 205 50.1
+221 200 Orange Sironj Wind Power Pvt. Ltd. 221 100
+220 218.2 Betam Wind Energy Private Limited 220 81.8
+207 150 GRT Jewellers (India) Pvt Ltd 207 0
+150 GRT Jewellers (India) Pvt Ltd
+211 230 NTPC 211 70
+215 & 216 540 JSW Renew Energy Limited 215 & 216 0
+140 JSW Renew Energy Twelve Ltd.*
+210 300 JSW Future Energy Ltd 210 0
+11 130 NCL Industries Ltd.* 11 170
+2598.1 0 481.9 0
+34 400/230 kV Pugalur S/s 10°57'42"N 77°55'22"E SR 2x315 MVA, 400/230 - 210 300 Sprng Renewable Energy Private Limited 210 0 0 0 Pugalur S/s has been closed for all purpose
+kV regarding grant of Connectivity through new bay
+1x500 MVA, 400/230 to potential RE projects.
+KV 52.8 Sprng Akshaya Urja Pvt. Ltd.
+213 151 Tata Power Renewable Energy Ltd. 1 0
+151.2 Tata Power Renewable Energy Ltd.
+655 0 0
+35 400/220 kV Palakkad S/s 10°46'22"N 76°45'36"E SR 2x315 MVA + 1x500 - 1 0
+MVA, 400/220 kV
+0 0 0
+36 400/220 kV NP Kunta S/s 14° 2'53.18"N, 78°25'43.01"E SR 4x500 MVA, 400/220 1x500 MVA, 1 1500 Andhra pradesh Solar Power Corporation Ltd. 1 0 2
+kV 400/220 kV
+2 2
+3 3
+4 4
+5 5
+6 6
+7 7
+8 8
+9 9
+10 10
+11 11
+12 12
+221 100 NHPC Ltd 13 100
+100 First Energy Pvt. Ltd.
+1700 0 100
+37 400/220 kV Pavagada S/s 14.318579N 77.385479E SR 6x500 MVA, 400/220 4x500 MVA, 1 2050 Karnataka Solar Power Development Corporation Ltd. 1 0 1 0 *Agreed for grant.
+kV 400/220 kV
+2 2
+3 3
+4 4
+5 5
+6 6
+7 7
+8 8

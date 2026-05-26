@@ -1,0 +1,79 @@
+3 765/400/220kV Bhuj-II PS# Boundary Coordinates WR 2x1500 MVA, 2x1500 MVA, 2 6
+Sl. No. Name of Substation 23°22'29.92"N S6u9b° s8t'a3t2i.o3n9 "CEoordinates Region Transforma7ti6o5n/ 4C0a0p akcVi;ty (MV7A6)5/400 kV (3rd & RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+23°22'26.60"N 69° 8'55.06"E 4X500 MVA, 4th ); (Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+23°22'6.44"N 69° 8'43.33"E 400/220 KV ISTS substation may be refered) Injection
+23°22'15.91"N 69° 8'24.01"E 5X500 MVA,
+400/220 KV (5th,
+Planned Existing 6th ,U7nthd,e 8rt h & 220kV 400kV 220kV* 400kV* 220kV 400kV
+Implem9tehn)tation
+Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins
+Quantum (MW) Quantum Available (MW) Available (MW)
+(MW)
+204 300 Inox Wind Infrastructure Services Ltd. 204 0
+202 300 NTPC REL (300) 202 0
+205 350 NTPC REL (150+200) 205 0
+211 360 SJVN Green Energy Ltd. 211 0
+Section - B
+8 314 ABREL (RJ) Projects Ltd. 8 0
+9 362 Aditya Birla Renewables Subsidiary Ltd. (362) 9 0
+10 350 ACME Cleantech Solutions Pvt. Ltd. 10 0
+11 150 ACME Cleantech Solutions Pvt. Ltd. (50+100*) 11 150
+12 300 Avaada Energy Pvt. Ltd. (100+200) 12 0
+13 375.5 Adani Green Energy Thirty-Two Ltd. (300) + 13 0
+Adani Renewable Energy Eight Ltd. (75.5)
+4000 1800
+4 400/220kV Bhachau S/s 23.20613889˚ N, 70.18733333˚ E WR 2X315 MVA, 1X500 MVA, 210 300 Ostro Kutch Wind Pvt. Ltd. 210 300 NIL 3 Availability of line corridor is limited.
+400/220 KV 400/220 KV
+211 211
+212 350 Renew Power Ventures Pvt. Ltd. 212 250
+213 213
+650
+5 Khavda PS-I Boundary Coordinates: WR 3x1500MVA, 1x1500MVA, Section-A
+534252.00 m E 2665370.00 m N 765/400kV (Sec-A) 765/400kV (Sec-A)
+534924.00 m E 2665328.00 m N & 401 2500 Adani Renewable Energy Holding Four Ltd. 401
+534892.00 m E 2664895.00 m N 4x1500MVA,
+534253.00 m E 2664935.00 m N 765/400kV (Sec- 407 407
+B); 404 1000 Adani Renewable Energy Holding Four Ltd. 404
+1x1500MVA,
+765/400kV (Sec-B)
+412 1050 Adani Green Energy Ltd. (1050) 412
+Section-B
+421 1650 Adani Green Energy Ltd. (1000+650) 421
+424 1160 Adani Green Energy Ltd. (1000+100+60) 424
+7 1300 Adani Green Energy Ltd. (1050+250) 7
+8 1150 Sarjan Realties Pvt. Ltd. 8
+9810
+6 Khavda PS-II Boundary Coordinates: WR 4x1500MVA, Section-A
+24° 4'56.96"N, 69°31'1.32"E; 765/400kV (2
+421 1964 Gujarat State Electricity Corproration Ltd. (600+1000+364) 421
+24° 4'59.66"N, 69°31'38.38"E; each on Sec-A &
+24° 4'33.74"N,69°31'40.65"E; Sec-B) & 416 416
+24° 4'31.07"N,69°31'3.56"E;
+4x1500MVA,
+418 1200 Gujarat Industries Power Company Ltd.(600 + 600) 418
+765/400kV (2
+each on Sec-A &
+Sec-B)
+4 1995 NTPC REL 4
+1x1500MVA, 5 5
+765/400kV (Sec-A)
+Section-B
+429 1555 NTPC Renewable Energy Ltd. (NTPC REL) (365+890+300) 429
+7 1361 Gujarat State Electricity Corproration Ltd. (1361 ) 7
+8 1175 Gujarat Industries Power Corporation Ltd. (1175) 8
+9250
+7 Khavda PS-III Boundary Coordinates: WR 4x1500MVA, Section-A
+24°12'26.58"N, 69°29'41.53"E; 765/400kV (Sec-A)
+406 1050 Adani Green Energy Ltd. (1050) 406
+24°12'26.50"N, 69°30'04.57"E; &
+24°12'13.57"N, 69°29'41.48"E;
+403 1200 NTPC Renewable Energy Ltd. (NTPC REL) (1200) 403
+24°12'13.50"N, 69°30'04.52"E; 3x1500MVA,
+765/400kV (Sec-B)
+412 1250 Sarjan Realties Pvt. Ltd. 412
+&
+1x1500MVA, 4 1100 Sarjan Realties Pvt. Ltd. 4
+765/400kV (Sec-B) Section-B
+5 1250 Sarjan Realties Pvt. Ltd. 5
+6 600 NHPC Ltd. 6
+7 1325 Adani Green Energy Ltd. (1250+75) 7

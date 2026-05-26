@@ -1,0 +1,95 @@
+61 400/220kV Fatehgarh-IV PS# NR 3x500MVA, 5x500MVA, No more evacuation can be accommodated due
+26°15'2.58" N, 400/220kV 400/220kV to system capacity constraints in existing /
+Sl. No. Name of Substation Substation Coordinates Region Transformation Capacity (MVA) RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+71°14'7.21" E (Section-II) (Section-I) planned system
+(Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+ISTS substation may be refered) Injection
+Planned Existing Und er 220kV 400kV 220kV* 400kV* 220kV 400kV
+Im4pxl1e5m0e0nMtaVtAio, n
+765/400kV, Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins
+5x500MVA, Quantum (MW) Quantum Available (MW) Available (MW)
+400/220kV (MW)
+(Section-II)
+3 300 Tepsol Saur Urja Pvt. Ltd. 4 0
+4 300 Sprng Pavana Urja Private Limited (50+100+150) 5 0
+5 410 Green Infra Clean Wind Technology Ltd. (300) 6 0
+Green Infra Clean Solar Farms Pvt. Ltd. (110)
+6 350 Juniper Green Stellar Pvt. Ltd. (300MW) 7 0
+Juniper Green Energy Pvt. Ltd (50MW)
+7 300 Utkrisht Solar Energy Pvt. Ltd. 8 0
+8 300 BN Dispatchable-1 Pvt. Ltd. 9 0
+9 300 Avaada Energy Pvt. Ltd. (50MW + 250MW) 10 0
+10 300 Gamma Renewables India Project One Pvt. Ltd. 11 0
+5505 1500 0 0
+62 765/400/220kV Bhadla-III PS# Boundary Coordinates NR 4X500MVA, 4x1500MVA, 202 400 Prerak Greentech Solar Private Limited 427 1000 ReNew Solar (Shakti Six) Private Limited (550 + 450) 202 0 427 0
+Point1:- N 27⁰40’56”, E 72⁰11’47” 400/220kV 765/400kV 204 340 Abu Renewables India Private Limited 2 800 ReNew Solar (Shakti Six) Private Limited (400 + 400) 204 0 2 0 No more evacuation can be accommodated due
+Point2:- N 27⁰41’17”, E 72⁰11’56” 5X500MVA, 206 300 Juniper Green Beta Pvt. Ltd. (150 + 40 + 70 + 40) 3 650 Malur Renewables Private Limited 206 0 3 0 to system capacity constraints in existing /
+Point3:- N 27⁰40’46”, E 72⁰11’59” 400/220kV planned system
+Point4:- N 27⁰41’00”, E 72⁰11’47” 208 300 Seven Renewable Power Pvt. Ltd. 208 0
+212 300 Tepsol Sun Sparkle Pvt. Ltd. 212 0
+216 300 Bhadla Three SKP Green Ventures Pvt. Ltd. 216 0
+210 300 Frugal Energy Pvt Ltd (50+250) 210 0
+1 300 Juniper Green India Six Private Limited 1 0
+2 300 Serentica Renewables India Private Limited 2 0
+3 160 Solarcraft Power India 4 Pvt. Ltd. (110 + 50) 3 50
+4 300 Green Infra Clean Energy Generation Ltd. 4 0
+5 400 Prerak Solar Urja Pvt. Ltd. 5 0
+6 300 Avaada Energy Pvt. Ltd.
+4000 2450 50 0
+63 765/400/220kV Ramgarh PS# Boundary Coordinates NR 1x1500 MVA 2x1500MVA, 1 300 Pravat Renewables India Pvt. Ltd. Main- 1184 Adani Renewable Energy Holding Four Ltd. (500 +284+250) 1 0 Main- 0 No more evacuation can be accommodated due
+Point1:- N 27°28'17.25" & E 70°29'38.37" 765/400kV 765/400kV 2 300 Juniper Green energy pvt. Ltd. (150MW + 150MW) 404 Adani Solar Energy AP Three Ltd. (150) 404 to system capacity constraints in existing /
+Point2:- N 27°28'33.14" & E 70°28'52.29" 2X500MVA, Tie-405 Tie-405 planned system
+Point3:- N 27°28'08.80" & E 70°28'34.37" 400/220kV
+Point4:- N 27°28'16.70" & E 70°28'43.16" 3 600 Migos Hybren Private Limited 2 1000 Adani Renewable Energy Holding Four Ltd. (500+500) 2 0 2 0
+4 3 600 Tata Power Renewable 3 0 3 0
+Energy Limited
+1200 2784 0 0
+64 765/400/220kV Bikaner-III PS# Boundary Coordinates NR 1X500MVA, 6x1500MVA, 214 250 Juniper Green Cosmic Private Limited (150) Main- 1000 MRS BUILDVISION PRIVATE LIMITED 214 0 Main- 0 No more evacuation can be accommodated due
+Point1:- N 28°22'22.5372", E 73°10'14.722" 400/220kV 765/400kV First Energy Private Limited (100) 446 446 to system capacity constraints in existing /
+Point2:- N 28°22'30.5184", E 73°10'58.998" 5X500MVA, Tie-445 Tie-445 planned system
+Point3:- N 28°22'22.0008", E 73°10'53.267" 400/220kV
+Point4:- N 28°22'5.8332", E 73°10'28.697" 203 217 Proteus Energy Private Limited (217) Main- 1400 SUNBREEZE RENEWABLES NINE PRIVATE LIMITED 203 0 Main- 0
+201 300 TP Saurya Limited 449, 201 449, 0
+452 452
+Tie-448, Tie-
+451 448,
+205 300 ACME Cleantech Solutions Private Limited 205 0 45 1
+207 400 Saimaa Solar Private Limited (150) 207 0
+Sunsure Solarpark RJ One Private Limited
+(50+50+50+50+50)
+216 500 NTPC Renewable Energy Ltd. 216 0
+218 218 0
+219 300 Deshraj Solar Energy Private Limited 219 0
+2267 2400 0
+65 765/400/220kV Bikaner-IV PS# Boundary coordinates (as per MOM dtd 16/05/24)* NR 6x1500MVA, 1 300 Solarcraft Power India 17 Pvt. Ltd. 1 950 Avaada RJBikaner Private Limited (50+600) 1 1 0
+Corner 1: 28° 26' 26.00" N 73° 14' 12.92" E 765/400kV 2 300 Sunsure Solar Park Fourteen Pvt. Ltd. 2 800 NTPC Renewable Energy Ltd. (150+250+400) 2 No more evacuation can be accommodated due
+Corner-2: 28° 26' 43.82" N 73° 14' 36.26" E 6X500MVA, 3 300 AM Green Energy Private Limited 3 1100 NTPC Renewable Energy Ltd. (700MW + 400MW) 3 to system capacity constraints in existing /
+Corner-3:28° 26' 59.50" N 73° 14' 18.44" E 400/220kV planned system
+Corner-4: 28° 26' 43.50" N 73° 13' 52.95" E
+4 300 Hazel Hybren Private Limited
+5 300 Iraax International (Opc) Pvt. Ltd.
+6 300 Clean Max Gamma Pvt. Ltd.
+7 250 Shudh Solar Power Private Limited
+8 300 Furies Solren Private Limited
+9 500 SJVN Green Energy Ltd.
+10
+11 300 Furies Solren Pvt. Ltd.
+3150 2850 0 0
+66 765/400/220kV Barmer-I PS# Boundary Coordinates NR 5x1500MVA, 1 400 ACME Cleantech Solutions Pvt. Ltd. 1 0 1
+Point1:- 25° 55'4.2"N, 71°7'25.43"E 765/400kV 2 300 Teq Green Power XV Pvt. Ltd. 2 0 2
+Point2:- 25° 55'11.22"N, 71°7'51.64"E 9X500MVA, 3 300 Juniper Green Energy Pvt. Ltd. 3 0 3 No more evacuation, except inicated 50 MW, can
+Point3:- 25° 54'51.34"N, 71°7'57.65"E 400/220kV be accommodated due to system capacity
+Point4:- 25° 54'43.74"N 4 300 Eden Renewable Cadet Pvt. Ltd. 4 0 4 constraints in existing / planned system
+71°7'33.33" E 5 300 Enren-I Energy Pvt. Ltd. 5 0 5
+6 300 Anboto Solar Private Limited (250MW + 50MW) 6 6
+7 300 Auxo Sunlight Private Limited 7 7
+8 300 Enfinity Global Surya Kiran Pvt. Ltd. 8 8
+9 300 ReNew Sun Power Private Limited 9 9
+10 600 Green Infra Renewable Projects Pvt. Ltd. 10 10
+11 250 Hinduja Renewables Energy Pvt. Ltd. (250MW) 11 11 50
+12 300 EG Mega Urja Pvt. Ltd. 12 12
+3950 0 50
+67 765/400/220kV Bhadla-IV PS Location yet to be identified NR Under Planning 1 300 Demeter Sun Power Private Limited 1 800 ReNew Solar Power Private Limited (200+300+300) 1 0 1 Tr. System under planning.
+2 600 Kantida Renewables India Project Pvt. Ltd (300) 0 2
+Vismaya Four Renewables Pvt. Ltd (250+50) 175
+3 765 Adani Renewable Energy Holding Four Limited 3

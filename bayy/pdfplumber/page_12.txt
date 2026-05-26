@@ -1,0 +1,79 @@
+Sl. No. Name of Substation Substation Coordinates Region Transformation Capacity (MVA) RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+(Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+ISTS substation may be refered) Injection
+Planned Existing Under 220kV 400kV 220kV* 400kV* 220kV 400kV
+Implementation
+Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins
+Quantum (MW) Quantum Available (MW) Available (MW)
+(MW)
+5472.7 1900 260 800
+53 765/400/220kV Kurnool-IV PS Boundary Coordinates SR 2x1500 MVA, 4x1500 MVA, 1 250 SAEL Industries Ltd. 1 300 NTPC RENEWABLE ENERGY LIMITED 1 50 1 0 6 10 New Pooling Station under bidding in Kurnool
+15°29'45.12"N 77°14'45.55"E 765/400kV & 765/400kV & area of AP.
+15°29'34.80"N 77°15'7.31"E 10x500 MVA, 4x500 MVA, 2 300 SAEL Industries Ltd. 600 NTPC RENEWABLE ENERGY LIMITED 2 0
+15°29'5.14"N 77°14'52.80"E 400/220 kV 400/220 kV *Agreed for grant
+15°29'14.01"N 77°14'29.24"E 3 400 TATA Power Renewable Energy Ltd. 2 500 Waaree Forever Energies Private Limited* 3 0
+4 230 Gentari Renewable India Castor One Pvt. Ltd. 4 70
+5 300 Pratapati Energy (Seven) Private Limited 5 0
+7 300 Vitalgreen Power Pvt. Ltd. 7 0
+9 300 ESSAR RENEWABLES LIMITED 9 0
+10 300 NTPC RENEWABLE ENERGY LIMITED 10 0
+11 300 NTPC RENEWABLE ENERGY LIMITED 11 0
+12 300 Clean Renewable Energy Hybrid Two Private Limited* 12 0
+13 250 Avaada Energy Private Limited* 13 50
+14 300 Clean Renewable Energy Hybrid Four Private Limited* 14 0
+15 300 Tata Power Renewable Energy Ltd.* 15 0
+16 360 ESSAR RENEWABLES LIMITED* 16 0
+17 400 Serentica Renewables India Private Limited* 17 0
+18 300 Bhalki Solar Power Private Limited* 18 0
+19 100 EG ELECTRICIA ENERGY PRIVATE LIMITED* 19 200
+20 250 ABC CT RE Park (04) Pvt. Ltd.* 20
+5240 1400 370
+54 765/400/220kV Bhadla PS # 27 25 10 N, 72 04 20E NR 3x1500MVA, 203 250 Adani Renewable Energy Park Rajasthan Ltd 0 0 1 0 No more evacuation can be accommodated due
+765/400kV, to system capacity constraints in existing /
+8x500MVA, 205 2 planned system.
+400/220kV 206 500 Saurya Urja Company of Rajasthan Ltd. 3 0
+207 4
+225 750 Essel Saurya Urja Company of Rajasthan Ltd. 225 0
+226 226
+237 130 Azure Power India Pvt. Ltd 237 0
+217 300 Tata Power Renewable Energy Ltd. (150+150) 217 0
+232 300 Azure Power India Pvt. Ltd 232 0
+235 300 Azure Power India Pvt. Ltd.(250+50) 235 0
+224 300 Adani Renewable Energy Holding One Ltd. 224 0
+(erstwhile Mahoba Solar (UP) Pvt. Ltd.)(200+50+50)
+223 250 ACME Solar Holdings Ltd 223 0
+219 250 Hero Solar Energy Pvt.Ltd. 219 0
+227 250 Mahindra Susten Private Limited 227 0
+3580 0 0
+55 765/400/220kV Bikaner S/s # 28 14 57 N, 73 22 55 E NR 1x500 MVA, 3x1500MVA, 1x1500MVA, 208 300 SBSR Power Cleantech Eleven Pvt. Ltd 415 850 ReNew Solar Power Pvt. Ltd. (250+300) 208 0 415 50 No more evacuation (except indicated 50 MW)
+400/220kV 765/400kV 765/400kV, AK Renewable Infra Pvt Ltd (300) can be accommodated due to system capacity
+3x500MVA, 1x500MVA, constraints in existing / planned system.
+400/220kV 400/220kV
+207 300 AVIKIRAN SURYA INDIA PRIVATE LIMITED 418 600 Azure Power India Pvt. Ltd.(300+300) 207 0 418
+204 335 Tata Power Green Energy Ltd. (225+110) 403 890 Avaada Energy Pvt. Ltd.(350+300+240) 204 0 403
+203 300 Shikhar Surya (One) Pvt. Ltd. 406 600 Ayana Renewable Power One Private Limited(300+300) 203 0 406
+(70+105+125)
+1235 2940 0 50
+56 400kV Fatehgarh PS (TBCB) # 26°51'8.48"N, 71°30'34.29"E NR - - - - - - Main: Adani Renewable Energy Park Rajasthan Ltd. Main: No more evacuation can be accommodated due
+403, 403, to system capacity constraints in existing /
+406 1000 406 0 planned system
+Tie: Tie:
+402, 402,
+405 405
+407 1200 ACME Solar Holdings Ltd. (4 applications each 300) 407 0
+0 2200 0
+57 765/400/220kV Bhadla-II PS # Boundary Coordinates NR 1x500 MVA, 4x1500MVA, 1x1500MVA, 202 925 441 550 NTPC Ltd.(250+300) 202 0 441 0 No more evacuation can be accommodated due
+Point1:- 27.5047695, 72.4764157 400/220kV 765/400kV 765/400kV 203 412 950 Azure Power India Private Limited (500+150) 203 412 0 to system capacity constraints in existing /
+Point2:- 27.5103991, 72.4844684 8X500MVA, 2X500MVA, Green Infra Clean Wind Ltd. (300MW) planned system
+Point3:- 27.5160828, 72.4792790 400/220kV 400/220kV 205 415 550 Adani Renewable Energy Holding Four Ltd. (500MW) 205 415 0
+Point4:- 27.5109950, 72.4713292 Rajasthan Solar Park Development Company Ltd. Adani Renewable Energy Holding Eighteen Limited (50MW)
+206 206
+208 250 Mahindra Susten Pvt. Ltd. 208 0
+209 300 ABC Solar (India) Private Limited (erstwhile TBEA Solar 209 0
+(India) Pvt Ltd.)
+218 300 ACME Solar Holdings Pvt. Ltd. 218 0
+(erstwhile ACME Solar Holdings Ltd)
+219 300 NTPC Ltd. 219 0
+221 300 Eden Renewable Alma Private Limited 221 0
+A202 600 Project Nine Renewable Power Private Limited (450MW) A202
+Solarcraft Power India 4 Pvt. Ltd. (150MW) 0

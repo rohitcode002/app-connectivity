@@ -1,0 +1,84 @@
+7 Khavda PS-III Boundary Coordinates: WR 4x1500MVA,
+24°12'26.58"N, 69°29'41.53"E; 765/400kV (Sec-A)
+24°12'26.50"N, 69°30'04.57"E; &
+24°12'13.57"N, 69°29'41.48"E;
+24°12'13.50"N, 69°30'04.52"E; 3x1500MVA,
+765/400kV (Sec-B)
+Sl. No. Name of Substation Substation Coordinates Region Transformation Capacity (MVA) RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+&
+(Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+1x1500MVA,
+ISTS substation may be refered) Injection
+765/400kV (Sec-B)
+Planned Existing Under 220kV 400kV 220kV* 400kV* 220kV 400kV
+Implementation
+Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins
+Quantum (MW) Quantum Available (MW) Available (MW)
+(MW)
+8 1965 Adani Green Energy Ltd. (1530+65+100+75+195) 8
+9 9
+9740
+8 Khavda PS-IV WR 4x1500MVA, Section-A
+765/400kV (Sec-A) & 1 1250 Adani Power Limited.(1250)
+2 1250 Adani Power Limited.(1250)
+4x1500MVA, 3 1250 Adani Power Limited.(1250)
+765/400kV (Sec-B) 4 625 Adani Power Limited.(625)
+Section-B
+5 625 Adani Power Limited.(625)
+6 1250 Adani Power Limited.(1250)
+7 1250 Adani Power Limited.(1250)
+8 1250 Adani Power Limited.(1250)
+8750
+9 Khavda PS-V WR 4x1500MVA, Section-A
+765/400kV (Sec-A) 1 1250 Adani Power Limited.(1250)
+2 1250 Adani Power Limited.(1250)
+Section-B
+3 1250 Adani Power Limited.(1250)
+3750
+10 Banaskantha (Radhanesda) PS Boundary Coordinates: WR 2x500 MVA, 400/220 2x500 MVA, 1 700 Radhanesda UMSP (GPCL) 3
+[GIS] (Vav) 24°20'33.9"N 71°29'08.3"E KV 400/220 KV 2
+24°20'40.4"N 71°29'13.5"E 4 250 Sprng Power Earth Pvt. Ltd.
+24°20'35.5"N 71°29'20.6"E
+24°20'29.0"N 71°29'15.3"E
+5 300 Sprng Energy Pvt. Ltd. (100+150);
+Sprng Vayu Vidyut Pvt. Ltd. (50)
+1250 0
+11 Raghanesda Boundary Coordinates: WR 4x1500 MVA, 1 350 Sunsure Solarpark RJ One Pvt. Ltd. (350) 1 1000 Sprng Wind Energy Pvt. Ltd. (200+100); Raghanesda PS is under approval stage.
+24°27'12.1"N 71°24'21.09"E 765/400 KV Sprng Ojas Pvt. Ltd. (200+100); Creation of 220kV level at Raghanesda is to be
+24°27'18.73"N 71°24'37.76"E Sprng Vayu Kiran Pvt. Ltd. (200+200) taken up for approval
+24°26'54.75"N 71°24'47.85"E 2x500 MVA, 400/220
+24°26'48.32"N 71°24'31.00"E KV 2 300 Azure Power Sixty Three Pvt. Ltd. 2 400 Jsw Neo Energy Ltd. (200+200)
+3 1000 Renew Solar Power Pvt. Ltd. (300+100+100+200+300)
+4 400 ACME Solar Holdings Ltd. (400MW)
+650 2800
+12 400/220kV Rajgarh (PG) (existing) 22.68222222˚ N, WR 2x315 MVA, 400/220 2x500MVA, Section-A @Injection of power would be on the extended
+S/s# 74.92444444˚ E KV 400/220 kV (3rd bus through 220kV GIS line bays being
+209 298.24 Sprng Vayu Vidyut Pvt Ltd.(55.44+50.4+50.4+ 42);
+&4th) terminated into 2x500MVA, 400/220kV ICT.
+Sprng Akshaya Urja Pvt. (100)
+(segregated from
+existing 220kV bus
+through bus Section-B (Extended Bus)@
+section)
+215 226.8 VEH Jayin Renewable Pvt. Ltd. (151.8);
+VEH Wind Energy Pvt. Ltd. (75)
+217 366.8 Sprng Vayu Vidyut Pvt. Ltd. (100+100.8+82+16.8);
+Sprng Akshaya Urja Pvt. Ltd. (67.2)
+4 200 Avaada Energy Pvt. Ltd. (50 + 150)
+1091.84
+13 400/220kV Indore (PG) (existing) 22°54'31.81"N, 75°53'58.87"E WR 2x1500 MVA, 1x1500 MVA, 214 324.4 SBESS Services Projectco Two Pvt. Ltd. 1 600 Renew Urja Sanchar Pvt. Ltd. (300); 214 0 1 2 Injection of power would be on the extended bus
+S/s 765/400 kV 3X500 765/400 kV (3rd) Renew Samir Urja Pvt. Ltd. (300) through 220kV Hybrid/MTS line bays. Additional
+MVA, 400/220 kV ICT quantum of about 150 can be evacuated in case
+of injection at 220kV level.
+324.4 600
+14 Pachora PS# 23.7177N 76.12333E WR 3x500MVA 3x500MVA, 3x500MVA, Section-A 6 6
+400/220kV 400/220kV 400/220kV
+201 450 RUMSL (Shajapur SP) 201 150
+202 202
+203 550 RUMSL (Agar SP) 203 50
+204 204
+205 235 Blue Leaf Energy Renewables Pvt. Ltd. 205 65
+206 240 VEH Saur Urja Pvt. Ltd.(163.2 ) + 206 60
+VEH Damen Power Pvt. Ltd. (76.8 )
+1475
+Section-B

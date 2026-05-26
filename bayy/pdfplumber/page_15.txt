@@ -1,0 +1,89 @@
+Sl. No. Name of Substation Substation Coordinates Region Transformation Capacity (MVA) RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+(Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+ISTS substation may be refered) Injection
+Planned Existing Under 220kV 400kV 220kV* 400kV* 220kV 400kV
+Implementation
+67 765/400/220kV Bhadla-IV PS Location yet to be identified NR Under Planning Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins Tr. System under planning.
+Quantum (MW) Quantum Available (MW) Available (MW)
+(MW)
+4 1360 Avaada Energy Pvt. Ltd. (700MW) 4 0
+Avaada RJSustainable Pvt. Ltd. (660MW)
+5 2000 Aright Foods And Energy Private Limited 5 0
+6 6 0
+300 5525 175
+68 765/400/220kV Sirohi S/s# Boundary Coordinates* NR 2x1500MVA, 1 300 CESC Ltd. 1 700 ReNew Solar Power Pvt. Ltd. (400+300) 1 0 1 0 No more evacuation can be accommodated due
+Point1:- 25° 5'17.12"N, 72°47'45.20"E 765/400kV, 2 300 Illuminate Hybren Private Limited 2 0 to system capacity constraints in existing /
+Point2:- 25° 5'4.97"N, 72°47'13.43"E 4x500MVA, 3 300 Serentica Renewables India Private Limited 3 0 planned system
+Point3:- 25° 4'42.39"N, 72°47'33.31"E 400/220kV 4 200 Izhma Solar Private Limited 4 0
+Point4:- 25° 5'1.36"N
+72°47'52.69" E 5 300 Vayuna Renewables India Project Pvt. Ltd. 5 0
+1400 700 0 0
+69 765/400/220kV Merta-II PS Boundary Coordinates* NR 2x1500MVA, 1 300 Purvah Green Power Private Limited 1 0 No more evacuation can be accommodated due
+Corner-1:- 26° 49' 24.02" N, 765/400kV 2 300 Green Infra Wind Energy Private Limited 2 0 to system capacity constraints in existing /
+74° 02' 15.46" E 5x500MVA, 3 300 Green Infra Wind Energy Private Limited 3 0 planned system
+Corner-2:- 26° 49' 28.49" N, 400/220kV 4 300 Banyan Energy Private Limited 4 0
+74° 02' 46.96" E 5 300 Juniper Green Energy Private Limited 5 0
+Corner-3:- 26° 49' 09.18" N, 6 300 Acme Solar Holdings Private Limited 6 0
+74° 02' 57.17" E
+Corner-4:- 26° 48' 58.96" N, 7 300 Hexa Climate Solutions Private Limited 7 0
+74° 02' 27.30" E
+2100 0
+70 765/400/220kV Merta-III PS Location yet to be identified NR To be planned 1 300 Enren-III Energy Private Limited 1 3GW RE Potential is identified in Merta Complex.
+2 Out of this, 2.1GW Connectivity granted at Merta-
+II PS. For balance 1GW, Merta-III is proposed to
+be developed.
+300
+71 765/400/220kV Barmer-II PS Location yet to be identified NR Under Planning 1 230 Green Infra Clean Solar Farms Limited (130MW) 1 900 NTPC Renewable Energy Limited (300+500+100*) No more evacuation can be accommodated due
+2 400 ASpdritnyga R Beirnleaw Raebnleew Raebsloeus rLcteds. P(1ri0v0aMteW Li)m*ited (200MW) 2 1000 Sprng Urja Private Limited to system capacity constraints in existing /
+3 200 SApvranagd aU rEjnae Prrgiyv aPtvet .L Limtdit.ed (200MW) 3 717 Adani Renewable Energy Holding Four planned system
+4 450 4 1195 LAidmaintei dRenewable Energy Holding Four
+5 300 Amaresha Renawables India Project Private Limited Limited (600+595)
+6 300 ReNew Solar Power Private Limited
+7 300 Vismaya Five Renewables Private Limited (250+50)
+2180 3812
+72 765/400/220kV Barmer-III PS Location yet to be identified NR To be planned 1 353 Foxtrot Solar Renewables Energy Pvt Ltd (100+80+74*) 200 ReNew Solar Power Private Limited 1 0 0 Additional application of about 3.5GW already
+2 300 Green Infra Renewable Energy Farms Pvt Ltd* 1 250 ReNew Solar Power Private Limited 2 0 received at Barmer-III
+3 300 Green Infra Renewable Energy Farms Pvt Ltd* 300 ReNew Solar Power Private Limited 3 0
+4 258.5 TEQ Green Power IX Pvt Limited (208.5MW) 2 750 Avaada Energy Private Limited 4 41.5
+Aditya Birla Renewables Limited (50MW)
+5 350 Rohat Solar Park Private Limited 3 800 Avaada Energy Private Limited 5 0
+6 350 ACME Gamma Urja Private Limited 4 150 Unique Hytech Renewable Energy Pvt. Ltd. 6 0
+7 300 Enren-IV Energy Private Limited 1000 Unique Hytech Renewable Energy Pvt. Ltd. 7 0
+8 300 Apraava Energy Private Limited 8 0
+9 9 0
+2511.5 3450 41.5
+73 765/400/220kV Bikaner-V PS Location yet to be identified NR To be planned 1 400 Saurya Urja Company of Rajasthan Limited 1 1600 1 1 No more evacuation (except 170MW) can be
+NTPC Renewable Energy Limited (1000+600)
+2 250 IRAAX International (OPC) Private Limited (100+150) 2 2 2 accommodated due to system capacity
+3 236 Avaada RJBikaner Private Limited (136) 3 560 Avaada Suryaenergy Private Limited 3 3 constraints in existing / planned system
+4 300 SSAol aRrecnreafwt aPbolwe eInr fIrnad Piari v8a Pteri vLaimtei tLeidm (it1e0d0) 4
+5 300 Vena Energy Vindhya Wind Power Private 5
+6 400 LJuimniipteedr Green Energy Private Limited 6
+7 350 Sunsure Solarpark RJ One Private Limited 7
+8 300 Purvah Green Power Private Limited 8
+9 300 Purvah Green Power Private Limited 9
+10 130 Juniper Green Energy Private Limited 10 170
+11 354 AVAADA RJBIKANER PRIVATE LIMITED 11
+12 350 Avaada Energy Private Limited 12
+3670 2160 170 0
+74 765/400/220kV Location yet to be identified NR To be planned 1 400 ReNew Solar Power Private Limited 1 1000 Adani Renewable Energy Holding Four 1 1
+Ramgarh-II PS 2 150 RJS Renewables Private Limited 2 1000 LAidmaintei dRenewable Energy Holding Four 2 150 2
+3 297 SHN Green Power Private Limited 3 700 LJSimWit Nedeo Energy Limited 3 3 200
+4 300 Dangri Wind Energy Pvt Ltd (100MW) 4
+Dharvi Kalan Wind Energy Pvt Ltd (100MW)
+Junachay Wind Energy Pvt Ltd (100MW)
+5 300 Tata Power Renewable Energy Limited
+1447 2700 150 200
+75 400/220kV Jalore PS Location yet to be identified NR To be planned 1 600 Sprng Vaayu Urja Private Limited 1000 ReNew Solar Power Private Limited 1
+2
+3 300 TEQ Green Power XV Private Limited
+900 1000
+76 400/220kV Sanchore PS Location yet to be identified NR To be planned 1 300 HR Saraswati Energy Private Limited
+300
+77 400/220kV Pali PS Location yet to be identified NR To be planned 1 300 TEQ Green XV Pvt. Ltd. 5
+2 300 Diyos Three Renewables Ltd.
+600
+78 400/220kV Bhadla-V PS Location yet to be identified NR To be planned 1 400 Sprng Green Energy 4 Private Limited 600 Azure Power Fifty One Private Limited Tr. System under planning.
+1000 Avaada Energy Private Limited
+400 1600
+#Location of Sirohi PS is liable to change and under finalization by TSP

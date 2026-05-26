@@ -1,0 +1,13 @@
+Sl. No. Name of Substation Substation Coordinates Region Transformation Capacity (MVA) RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+(Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+ISTS substation may be refered) Injection
+Planned Existing Under 220kV 400kV 220kV* 400kV* 220kV 400kV
+Implementation
+Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins
+Quantum (MW) Quantum Available (MW) Available (MW)
+(MW)
+Disclaimer :-
+1. Boundary coordinates indicates the periphery within which the Sub-station is located.
+2. Bay numbers are indicative in nature and may be co-related with SLD issued by concerned ISTS Licensee.
+3. #The co-ordinates are tentative in nature and subject to change as per availablity of land with in boundary limit. Boundary limit is 3 km radius of above plot (3 km from any of the corner).
+4. Transition of Connectivity applications received under Connectivity Regulations 2009 to GNA and Connectivity/GNA applications received under GNA Regulations, 2022 are under process.

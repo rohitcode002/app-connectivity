@@ -1,0 +1,71 @@
+Sl. No. Name of Substation Substation Coordinates Region Transformation Capacity (MVA) RE Capacity Granted Margin on Existing / Under Implementation Bays (for Space Provision for Future Remarks
+(Connectivity) power evacuation margin, sheet reg. status of margin at Additional Line Bays (No.) for
+ISTS substation may be refered) Injection
+Planned Existing Under 220kV 400kV 220kV* 400kV* 220kV 400kV
+Implementation
+Bay No. Connectivity Name of Entity Bay No. Connectivity Name of Entity Bay No. Bay-wise Margins Bay No. Bay-wise Margins
+Quantum (MW) Quantum Available (MW) Available (MW)
+(MW)
+2269.1 500 0
+42 400/220 kV Gadag S/s Boundary coordinates SR 2x500 MVA, 400/220 4x500 MVA, 203 160 Vena Energy Vidyuth Private Limited (VEVPL) (160) 203 0 0 Gadag PS has been closed for all purpose
+15°47'13.673"N , 75°51'35.001" E kV 400/220 kV regarding grant of Connectivity.
+15°47'13.207" N, 75°51'22.707" E 204 300 Renew Solar Power Pvt. Ltd. 204 0
+15°46'58.257" N, 75°51'20.956" E $ Consequent to cancellation of LOA by SECI,
+15°46'57.085" N, 75°51'34.122" E 201 170 Azure Power India Private Ltd (120 + 50 ) 201 0 Connectivity has been revoked. However, Hon'ble
+CERC & Hon'ble High Court of Karnataka has
+130 Halvad Renewables Pvt. Ltd. stayed the revocation and subsequent allocation
+of bays / capacity.
+202 300 Green Infra Wind Energy Ltd (GIWEL) (180 + 120 + 50 ) 202 0
+216 285 Serentica Renewable India Pvt. Ltd. (165 + 120 ) 216 0
+213 300 Renew Naveen Urja Pvt. Ltd 213 0
+215 300 Project Eight Renewable Power Private Limited $ 215 0
+217 300 SolarOne Energy Private Limited $ 217 0
+2245 0 0
+43 765/400/220kV Koppal-II PS 15°34'3.63"N , 76°7'2.74"E SR 3x1500 MVA, 4x1500 MVA, 202 85 Tata Power Renewable Energy Ltd 202 0 1 6 New Pooling Station under implementation in
+765/400kV & 765/400kV & Koppal area of Karnataka.
+5x500 MVA, 400/220 4x500 MVA, 85 Tata Power Renewable Energy Ltd.
+kV 400/220 kV Space provision for additional bays is indicated
+100 Ayana Renewable Power Pvt Ltd. considering Koppal-II PS for 9 GW capacity which
+includes RE potential at Koppal-II & Gadag-II .
+204 300 Tata Power Renewable Energy Ltd. 204 0 However allocation of bays at Koppal-II PS shall
+be made considering margins and applications
+206 300 Scatec India Renewables One Pvt. Ltd 206 0 received at Koppal-II PS & Gadag-II PS .
+208 300 Torrent Saurya Urja 2 Pvt. Ltd. 208 0 Koppal-II PS has been closed for all purpose
+regarding grant of Connectivity and addition of RE
+212 184 ABREL (RJ) Projects Ltd. 212 0 generation capacity.
+102 Aditya Birla Renewables Subsidiary Ltd.
+214 153.6 VEH Green Energy Pvt. Ltd. 214 0
+50 Vena Energy Aura Pvt. Ltd.
+50 Vena Energy Aura Pvt. Ltd.
+24 Vena Energy Aura Pvt. Ltd.
+216 288 Tata Power Renewable Energy Ltd. 216 0
+218 & 224 400 JSP Green Wind 1 Pvt. Ltd. 218 & 224 0
+50 Avaada Energy Pvt. Ltd.
+226 226 0
+250 Avaada Energy Pvt. Ltd.
+228 225 Tata Power Renewable Energy Ltd. 228 0
+218 & 224 300 JSP Green Wind 1 Pvt. Ltd 218 & 224 0
+234 300 Gadag Power India Pvt. Ltd. 234 0
+236 125.4 Torrent Solar Power Pvt Ltd. 236
+230 232.5 Tata Power Renewable Energy Ltd. 230
+3904.5 0 0
+44 400/220kV Gadag-II PS 15°22'45.88"N, 75°49'37.11"E SR 7x500 MVA, 2x500 MVA, 202 200 TP Saurya Ltd. 419 & 640 Greenko KA01 IREP Pvt. Ltd. 202 0 419 & 0 0 2 New Pooling Station under implementation in
+400/220kV 400/220 kV 422 422 Gadag area of Karnataka.
+2 82.8 Azure Power India Pvt Ltd. 260 Greenko KA01 IREP Pvt. Ltd. 2 0 0
+Gadag-II PS has been closed for all purpose
+416 50 Serentica Renewables india Pvt. Ltd. 416 regarding grant of Connectivity and addition of RE
+generation capacity.
+204 300 Green Infra Wind Energy Ltd. 50 Serentica Renewables india Pvt. Ltd. 204 0
+206 170 Tata Power Renewable Energy Ltd 50 Serentica Renewables india Pvt. Ltd. 206 0
+170 Tata Power Renewable Energy Ltd. 50 Serentica Renewables india Pvt. Ltd.
+227 207 SolarXL Beta Energy Pvt. Ltd. 150 Serentica Renewables india Pvt. Ltd. 227 0
+230 250 Project Nine Renewable Power Pvt. Ltd. 550 Serentica Renewables india Pvt. Ltd. 230 0
+50 Avaada Energy Pvt. Ltd.
+232 184 ABREL (RJ) Projects Ltd. 232 0
+102 Aditya Birla Renewables Subsidiary Ltd.
+221 300 Renew Vayu Energy Pvt. Ltd. 221 0
+214 400 Tata Power Renewable Energy Ltd. 214 0
+216 250 Avaada Energy Pvt. Ltd. 216 0
+225 300 Green Infra Renewable Projects Ltd. 225 0
+219 350 NTPC Renewable Ltd. 219
+3315.8 1800 0 0

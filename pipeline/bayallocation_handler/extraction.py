@@ -1,8 +1,12 @@
 """
 bayallocation_handler/extraction.py -- PDF table extraction logic
 =================================================================
-Uses pdfplumber to extract the bay-allocation table from each page of the
-Bay Allocation PDF. Each page is treated as one independent extraction unit.
+Uses Camelot as the primary table extractor for the bay-allocation
+table from each page, with pdfplumber as fallback. Each page is
+treated as one independent extraction unit.
+
+Camelot produces higher accuracy tables (99%+ with lattice mode)
+compared to pdfplumber's less reliable cell detection.
 
 The output keeps the old substation-level ``220kv.bay_no`` / ``400kv.bay_no``
 dicts for compatibility, and also emits richer row-level JSON:
@@ -20,6 +24,12 @@ import re
 from typing import Optional
 
 import pdfplumber
+
+try:
+    import camelot
+    _HAS_CAMELOT = True
+except ImportError:
+    _HAS_CAMELOT = False
 
 from pipeline.bayallocation_handler.models import (
     REQUIRED_KEYWORDS,
@@ -382,9 +392,40 @@ def _table_row_record(
 # Core extraction:  page  ->  list of substations
 # ---------------------------------------------------------------------------
 
-def extract_page_data(page, page_number: int) -> Optional[dict]:
-    """Extract all substations from one pdfplumber page.
+def _camelot_extract_tables(pdf_path: str, page_number: int) -> tuple[list, str]:
+    """Primary: extract tables from a page using Camelot (lattice first, stream).
 
+    Returns (camelot_table_objects, flavor_used).
+    """
+    if not _HAS_CAMELOT:
+        return [], ""
+
+    for flavor in ('lattice', 'stream'):
+        try:
+            tables = camelot.read_pdf(
+                pdf_path, pages=str(page_number), flavor=flavor,
+                suppress_stdout=True,
+            )
+            if tables and tables.n:
+                return tables, flavor
+        except Exception:
+            pass
+    return [], ""
+
+
+def _camelot_to_raw_rows(camelot_tables) -> list[list[str]]:
+    """Convert camelot table objects to flat list of row-lists."""
+    all_rows: list[list[str]] = []
+    for tbl in camelot_tables:
+        for _, row in tbl.df.iterrows():
+            all_rows.append([_clean(str(v)) if v else "" for v in row.values])
+    return all_rows
+
+
+def extract_page_data(page, page_number: int, pdf_path: str = "") -> Optional[dict]:
+    """Extract all substations from one page.
+
+    Uses Camelot as primary table extractor, pdfplumber as fallback.
     Each unique substation (identified by sl_no appearing in column 0)
     becomes **exactly one item** in the returned ``substations`` list.
     Each bay number is mapped to its entity name (or empty string) in
@@ -392,17 +433,38 @@ def extract_page_data(page, page_number: int) -> Optional[dict]:
 
     Returns None if no allocation table is found on this page.
     """
-    table_objects = page.find_tables()
-    target_table = None
     target = None
-    for tbl in table_objects:
-        extracted = tbl.extract()
-        if _is_target_table(extracted):
-            target_table = tbl
-            target = extracted
-            break
+    target_table = None  # pdfplumber table object (for cell-level extraction)
+    extraction_method = ""
+    use_camelot_rows = False
+    camelot_rows: list[list[str]] = []
 
-    if target is None or target_table is None:
+    # ── Primary: Camelot ──────────────────────────────────────────────────
+    if pdf_path and _HAS_CAMELOT:
+        camelot_tables, flavor = _camelot_extract_tables(pdf_path, page_number)
+        if camelot_tables:
+            raw_rows = _camelot_to_raw_rows(camelot_tables)
+            if _is_target_table(raw_rows):
+                camelot_rows = raw_rows
+                target = raw_rows
+                use_camelot_rows = True
+                extraction_method = f"camelot_{flavor}"
+                print(f"  + Page {page_number:3d} camelot found {len(camelot_tables)} table(s) via {flavor}")
+
+    # ── Fallback: pdfplumber ──────────────────────────────────────────────
+    if target is None:
+        if extraction_method == "":
+            print(f"    Page {page_number:3d} camelot found 0 tables, trying pdfplumber")
+        table_objects = page.find_tables()
+        for tbl in table_objects:
+            extracted = tbl.extract()
+            if _is_target_table(extracted):
+                target_table = tbl
+                target = extracted
+                extraction_method = "pdfplumber_fallback"
+                break
+
+    if target is None:
         return None
 
     n_cols = len(COLUMN_NAMES)
@@ -412,15 +474,20 @@ def extract_page_data(page, page_number: int) -> Optional[dict]:
     table_rows: list[dict] = []
     current_section = ""
 
-    for table_row_index in range(HEADER_ROW_COUNT, len(target_table.rows)):
-        raw_row = _extract_row_from_cells(page, target_table, table_row_index, n_cols)
-        norm = _normalise_row(raw_row, n_cols)
+    for table_row_index in range(HEADER_ROW_COUNT, len(target) if use_camelot_rows else len(target_table.rows)):
+        if use_camelot_rows:
+            # Camelot path: rows are already clean string lists
+            norm = _normalise_row(target[table_row_index], n_cols)
+        else:
+            # pdfplumber fallback path: extract from cell bboxes
+            raw_row = _extract_row_from_cells(page, target_table, table_row_index, n_cols)
+            norm = _normalise_row(raw_row, n_cols)
 
-        # Recover left fixed columns for rows where pdfplumber drops rowspans.
-        left_values = _extract_left_column_values(page, target_table, table_row_index, n_cols)
-        for idx, value in enumerate(left_values):
-            if value and (idx <= 3 or not norm[idx]):
-                norm[idx] = value
+            # Recover left fixed columns for rows where pdfplumber drops rowspans.
+            left_values = _extract_left_column_values(page, target_table, table_row_index, n_cols)
+            for idx, value in enumerate(left_values):
+                if value and (idx <= 3 or not norm[idx]):
+                    norm[idx] = value
 
         # ── Skip noise rows ────────────────────────────────────────────────
         if not any(norm):
@@ -563,6 +630,9 @@ def extract_page_data(page, page_number: int) -> Optional[dict]:
 def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1) -> list[dict]:
     """Extract all pages from one Bay Allocation PDF.
 
+    Uses Camelot as primary table extractor (higher accuracy) with
+    pdfplumber as fallback when Camelot finds no tables.
+
     Parameters
     ----------
     max_pages : int
@@ -594,7 +664,7 @@ def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1) -> list[dict]:
                 print(f"  o Page {page_number:3d} -- skipped (keyword gate)")
                 continue
 
-            result = extract_page_data(page, page_number)
+            result = extract_page_data(page, page_number, pdf_path=pdf_path)
             if result is None:
                 print(f"  o Page {page_number:3d} -- no allocation table found")
                 continue

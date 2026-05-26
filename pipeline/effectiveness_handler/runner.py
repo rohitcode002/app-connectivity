@@ -2,7 +2,7 @@
 effectiveness_handler/runner.py — Effectiveness Orchestration
 ================================================================
 Discovers effectiveness PDFs, checks JSON cache, extracts un-cached
-PDFs, writes effectiveness_combined.xlsx.
+PDFs using Camelot (no LLM needed), writes effectiveness_combined.xlsx.
 
 This is the only file that performs I/O orchestration for Module 2.
 Edit extraction.py to change how data is extracted from PDFs.
@@ -21,7 +21,7 @@ import pandas as pd
 from config import RuntimeConfig, load_runtime_config
 from pipeline.excel_utils import export_to_excel
 from pipeline.effectiveness_handler.models import RERecord, safe_record, dedup_records, EFF_COLUMNS
-from pipeline.effectiveness_handler.extraction import extract_with_llm, extract_with_tables
+from pipeline.effectiveness_handler.extraction import extract_effectiveness_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,6 @@ def run_effectiveness_extraction(
     if runtime is None:
         runtime = load_runtime_config()
 
-    use_llm = bool(runtime.api_key)
 
     print("\n" + "=" * 64)
     print("  MODULE 2 — EFFECTIVENESS PDF EXTRACTION")
@@ -113,8 +112,7 @@ def run_effectiveness_extraction(
     print(f"  PDFs found  : {len(pdf_files)}")
     print(f"  Cached      : {cached_count}  (will be skipped)")
     print(f"  To extract  : {len(pdf_files) - cached_count}")
-    print(f"  Mode        : {runtime.execution_target}")
-    print(f"  Max pages   : {max_pages if max_pages != -1 else 'ALL'}")
+    print(f"  Mode        : Camelot (direct table extraction)")
     print("=" * 64)
 
     for pdf_path in pdf_files:
@@ -125,9 +123,7 @@ def run_effectiveness_extraction(
 
         print(f"\n  EXTRACT {pdf_path.name}")
         try:
-            records = extract_with_llm(str(pdf_path), pdf_path.name, runtime, max_pages=max_pages) \
-                      if use_llm else \
-                      extract_with_tables(str(pdf_path), pdf_path.name, max_pages=max_pages)
+            records = extract_effectiveness_pdf(str(pdf_path), pdf_path.name, max_pages=max_pages)
         except Exception as exc:
             logger.error("[Effectiveness] Failed %s: %s", pdf_path.name, exc)
             print(f"  ERROR   {pdf_path.name}: {exc}")
