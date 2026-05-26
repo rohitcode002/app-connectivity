@@ -148,9 +148,13 @@ def _flatten(all_serialized: list[dict]) -> list[dict]:
                 for col in CMETS_COLUMNS:
                     if col not in rec:  # skip PDF, Page, meeting cols already set
                         rec[col] = row.get(col)
-                rec["Applied Start of Connectivity sought by developer date"
-                    "( start date of connectivity as per the application)"] = (
-                    row.get("Applied Start of Connectivity sought by developer date")
+                start_col = (
+                    "Applied Start of Connectivity sought by developer date"
+                    "( start date of connectivity as per the application)"
+                )
+                rec[start_col] = (
+                    row.get(start_col)
+                    or row.get("Applied Start of Connectivity sought by developer date")
                     or row.get("Start Date of Connectivity (As per Application)")
                 )
                 records.append(rec)

@@ -33,6 +33,46 @@ CAPACITY_COLUMNS = [
 
 REGION_COLUMN = "Region"
 
+FINAL_FORMATTED_COLUMNS = [
+    "Region",
+    "State",
+    "Substation",
+    "Coordinates",
+    "Name of Developers",
+    "GNA/ST II Application ID",
+    "LTA Application ID",
+    "Application ID under Enhancement 5.2 or revision",
+    "CMETS GNA Approved",
+    "CMETS LTA Approved",
+    "CMETS GNA Meeting Date",
+    "CMETS LTA Meeting Date",
+    "Type",
+    "Application Quantum (MW)(ST II)",
+    "Installed/Break-up Capacity (MW) Solar",
+    "Installed/Break-up Capacity (MW) Wind",
+    "Installed/Break-up Capacity (MW) Hybrid",
+    "Installed/Break-up Capacity (MW) Hydro",
+    "Battery MWh",
+    "Battery Injection (MW)",
+    "Battery Drawl (MW)",
+    "PSP MWh",
+    "PSP Injection (MW)",
+    "PSP Drawl (MW)",
+    "Commissioned TGNA",
+    "Commissioned GNA",
+    "Application/Submission Date",
+    "Mode(Criteria for applying)",
+    "Applied Start of Connectivity sought by developer date"
+    "( start date of connectivity as per the application)",
+    "GNA Operationalization Date",
+    "GNA Operationalization (Yes/No)",
+    "Date from which additional capacity is to be added",
+    "Nature of Applicant",
+    "Status of application(Withdrawn / granted. Revoked.)",
+    "Voltage level",
+    "Bay No",
+]
+
 _REGION_PATTERNS = [
     (r"\bnorth[\s_-]*eastern[\s_-]*region\b", "NER"),
     (r"\bnorth[\s_-]*east(?:ern)?\b", "NER"),
@@ -131,6 +171,13 @@ def _format_number(value: float) -> int | float:
     return int(value) if float(value).is_integer() else round(value, 4)
 
 
+def _format_numeric_cell(value: Any) -> int | float | None:
+    match = re.search(r"\d+(?:,\d{3})*(?:\.\d+)?", _text(value))
+    if not match:
+        return None
+    return _format_number(float(match.group(0).replace(",", "")))
+
+
 def _parse_type(value: Any) -> tuple[str | None, dict[str, int | float]]:
     text = _text(value)
     if not text:
@@ -180,6 +227,27 @@ def _get(ws, row_idx: int, headers: dict[str, int], col: str) -> Any:
     return ws.cell(row=row_idx, column=headers[col]).value
 
 
+def _reorder_columns(ws, ordered_columns: list[str]) -> None:
+    """Rewrite the worksheet with exactly the requested user-facing columns."""
+    headers = _headers(ws)
+    rows: list[dict[str, Any]] = []
+    for row_idx in range(2, ws.max_row + 1):
+        rows.append({
+            col: ws.cell(row=row_idx, column=col_idx).value
+            for col, col_idx in headers.items()
+        })
+
+    if ws.max_column:
+        ws.delete_cols(1, ws.max_column)
+
+    for col_idx, col_name in enumerate(ordered_columns, 1):
+        ws.cell(row=1, column=col_idx, value=col_name)
+
+    for row_idx, row in enumerate(rows, 2):
+        for col_idx, col_name in enumerate(ordered_columns, 1):
+            ws.cell(row=row_idx, column=col_idx, value=row.get(col_name))
+
+
 def format_cmets_excel(source_path: str | Path, output_path: str | Path | None = None) -> Path:
     """Create a final formatted CMETS workbook and return its path."""
     src = Path(source_path).resolve()
@@ -187,7 +255,7 @@ def format_cmets_excel(source_path: str | Path, output_path: str | Path | None =
 
     wb = load_workbook(src)
     ws = wb["Extracted Data"] if "Extracted Data" in wb.sheetnames else wb.active
-    headers = _ensure_columns(ws, [REGION_COLUMN] + CAPACITY_COLUMNS)
+    headers = _ensure_columns(ws, FINAL_FORMATTED_COLUMNS)
 
     for row_idx in range(2, ws.max_row + 1):
         region = _format_region(
@@ -215,6 +283,14 @@ def format_cmets_excel(source_path: str | Path, output_path: str | Path | None =
             ws,
             row_idx,
             headers,
+            "Application Quantum (MW)(ST II)",
+            _format_numeric_cell(_get(ws, row_idx, headers, "Application Quantum (MW)(ST II)")),
+        )
+
+        _set(
+            ws,
+            row_idx,
+            headers,
             "GNA Operationalization (Yes/No)",
             gna_yes_no(_get(ws, row_idx, headers, "GNA Operationalization Date")),
         )
@@ -230,6 +306,8 @@ def format_cmets_excel(source_path: str | Path, output_path: str | Path | None =
         _set(ws, row_idx, headers, "Type", formatted_type)
         for col in CAPACITY_COLUMNS:
             _set(ws, row_idx, headers, col, capacities.get(col))
+
+    _reorder_columns(ws, FINAL_FORMATTED_COLUMNS)
 
     opx = _get_openpyxl()
     ws.freeze_panes = "A2"

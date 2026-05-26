@@ -24,6 +24,9 @@ EXTRACTION RULES (CRITICAL)
 - Keep values as strings exactly as seen in the text.
 - Ignore headers, footnotes, and purely explanatory paragraphs.
 - "Name of the developers" must be the company/applicant name, NOT criterion values like "SECI LOA".
+- "Nature of Applicant" is REQUIRED for every row. If the table uses merged cells
+  or visual continuation, repeat the visible Nature of Applicant value for each
+  row in that block.
 
 PRIMARY KEY RULE (CRITICAL):
   A row MUST have at least ONE of these three IDs to be valid:
@@ -63,9 +66,9 @@ SKIP RULES — DO NOT extract rows if:
 - Battery values: fill only when BESS / Battery wording is explicitly present.
   If a duration is found in the text (e.g. "4 hours", "four (4) hours") and
   Battery MWh is NOT explicitly stated, compute: Battery MWh = Battery Injection (MW) × duration_hours.
-- "type" MUST be strictly one of these keywords: Solar, BESS, Wind, Solar+Wind, Solar+BESS
+- "type" MUST use only these component labels: Solar, Wind, Hydro, BESS, PSP
   with associated MW values in parentheses if present.
-  Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar+Wind (500)", "BESS (50)", or null.
+  Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)", "BESS (50)", or null.
   Do NOT include any other words, sentences, or descriptions in the type field."""
 
 

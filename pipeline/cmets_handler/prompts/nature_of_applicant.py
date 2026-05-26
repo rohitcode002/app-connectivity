@@ -14,11 +14,16 @@ VARIANTS = [
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
-CONDITIONAL: extract this field ONLY if "Nature of Applicant" appears
-in the detected column labels for this page.  If it is NOT listed in
-the detected columns, return null for every row — do NOT guess or infer.
-When present, extract the value EXACTLY as it appears in the table cell.
+This field is REQUIRED for every extracted row.
+Extract the value EXACTLY as it appears in the table cell.
 Do NOT shorten, paraphrase, or normalise — copy verbatim.
+If the PDF table uses a merged/repeated "Nature of Applicant" cell for
+multiple rows, copy that same visible value into every row covered by it.
+If the page has a "Nature of Applicant" column but an individual row cell
+is visually blank because it continues from the row above, use the nearest
+preceding visible Nature of Applicant value in the same table.
+Only return null when no Nature of Applicant value is visible anywhere for
+that row or table block.
 
 Known values:
   "REGS with installed capacity of 5 MW & above applying for Connectivity through electrical system of a generating station already having Connectivity to ISTS"

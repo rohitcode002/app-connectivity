@@ -11,8 +11,8 @@ response is parsed.
 
 from __future__ import annotations
 
-import json
 import re
+from pathlib import Path
 from typing import Optional
 
 import camelot
@@ -30,6 +30,10 @@ from pipeline.cmets_handler.voltage_extractor import (
 )
 from pipeline.shared_utils import parse_json
 from pipeline.token_usage import record_llm_token_usage
+
+
+_START_DIR = Path(__file__).resolve().parent.parent.parent
+_CAMELOT_OUTPUT_ROOT = _START_DIR / "cmets_camelot"
 
 
 # ── Helper: route 5.2 application-number columns ─────────────────────────────
@@ -138,42 +142,132 @@ def _rows_to_markdown(rows: list) -> str:
     return "\n".join(lines)
 
 
-def _camelot_table_text(pdf_path: str, page_number: int) -> str:
-    """Extract table text from a page using Camelot Markdown tables for LLM context."""
-    try:
-        tables = camelot.read_pdf(
-            pdf_path, pages=str(page_number), flavor="lattice",
-            suppress_stdout=True,
-        )
-        if not tables or not tables.n:
+def _safe_path_part(value: str) -> str:
+    value = re.sub(r"[^\w .()&+-]+", "_", value.strip())
+    value = re.sub(r"\s+", " ", value).strip(" .")
+    return value or "unknown"
+
+
+def _region_name_from_pdf_path(pdf_path: str) -> str:
+    path = Path(pdf_path).resolve()
+    parts = path.parts
+    lower_parts = [part.lower() for part in parts]
+
+    if "minutes" in lower_parts:
+        idx = lower_parts.index("minutes")
+        if idx + 1 < len(parts) - 1:
+            return _safe_path_part(parts[idx + 1])
+        if idx > 0:
+            return _safe_path_part(parts[idx - 1])
+
+    return _safe_path_part(path.parent.name)
+
+
+def _camelot_output_dir(pdf_path: str) -> Path:
+    pdf = Path(pdf_path)
+    return _CAMELOT_OUTPUT_ROOT / _region_name_from_pdf_path(pdf_path) / _safe_path_part(pdf.stem)
+
+
+def _read_camelot_tables(pdf_path: str, page_number: int):
+    for flavor in ("lattice", "stream"):
+        try:
             tables = camelot.read_pdf(
-                pdf_path, pages=str(page_number), flavor="stream",
+                pdf_path,
+                pages=str(page_number),
+                flavor=flavor,
                 suppress_stdout=True,
             )
-    except Exception:
-        return ""
+        except Exception:
+            continue
+        if tables and tables.n:
+            return tables, flavor
+    return [], ""
+
+
+def _render_camelot_page(pdf_path: str, page_number: int) -> tuple[str, int, str]:
+    """Extract one page using Camelot and render tables as Markdown."""
+    tables, flavor = _read_camelot_tables(pdf_path, page_number)
+    lines: list[str] = []
 
     if not tables:
-        return ""
+        lines.append(f"{'=' * 60}")
+        lines.append(f"PAGE {page_number} — no tables detected")
+        lines.append(f"{'=' * 60}")
+        return "\n".join(lines), 0, flavor
 
-    rendered: list[str] = []
     for table_idx, table in enumerate(tables, 1):
         acc = table.parsing_report.get("accuracy", "n/a")
         rows = [table.df.columns.tolist()] + table.df.values.tolist()
         rows = [[_clean_multiline(cell) for cell in row] for row in rows]
-        rendered.append(
-            f"{'=' * 60}\n"
-            f"TABLE {table_idx}  (accuracy: {acc})\n"
-            f"{'=' * 60}\n"
-            f"{_rows_to_markdown(rows)}"
-        )
-    return "\n\n".join(rendered)
+        lines.append(f"{'=' * 60}")
+        lines.append(f"PAGE {page_number} — TABLE {table_idx}  (accuracy: {acc}, flavor: {flavor})")
+        lines.append(f"{'=' * 60}")
+        lines.append(_rows_to_markdown(rows))
+        lines.append("")
+
+    return "\n".join(lines).rstrip(), len(tables), flavor
+
+
+def _save_camelot_page_text(pdf_path: str, page_number: int, page_text: str) -> Path:
+    dest = _camelot_output_dir(pdf_path)
+    dest.mkdir(parents=True, exist_ok=True)
+    out_file = dest / f"page {page_number}.txt"
+    out_file.write_text(page_text, encoding="utf-8")
+    return out_file
+
+
+def _ensure_nature_field(active_fields: list[str]) -> list[str]:
+    if "Nature of Applicant" in active_fields:
+        return active_fields
+    return [*active_fields, "Nature of Applicant"]
+
+
+def _backfill_nature_of_applicant(raw_rows: list[dict], page_text: str) -> list[dict]:
+    """Fill missing Nature of Applicant from visible page/neighbor values."""
+    known_values = [
+        str(row.get("Nature of Applicant")).strip()
+        for row in raw_rows
+        if isinstance(row, dict) and str(row.get("Nature of Applicant") or "").strip()
+    ]
+
+    page_matches = re.findall(
+        r"\b(?:Generating station(?:\(s\))?, including REGS(?:\(s\))?, (?:with|without) ESS"
+        r"(?: through a lead generator)?|Generator(?: with ESS|\s*\((?:Hybrid|Wind|Solar)\))?|"
+        r"Standalone ESS|Renewable Power Park Developer|Renewable Power Park developer|"
+        r"Captive generating plant|Pumped Storage)\b",
+        page_text,
+        flags=re.IGNORECASE,
+    )
+    known_values.extend(match.strip() for match in page_matches if match.strip())
+
+    fallback = None
+    unique = []
+    seen = set()
+    for value in known_values:
+        key = value.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(value)
+    if len(unique) == 1:
+        fallback = unique[0]
+
+    last_seen = fallback
+    for row in raw_rows:
+        if not isinstance(row, dict):
+            continue
+        current = str(row.get("Nature of Applicant") or "").strip()
+        if current:
+            last_seen = current
+            continue
+        if last_seen:
+            row["Nature of Applicant"] = last_seen
+    return raw_rows
 
 
 # ── Sub-layer A: PDF page extraction ──────────────────────────────────────────
 
 def extract_pages(pdf_path: str, max_pages: int = -1) -> list[dict]:
-    """Read page text from *pdf_path* using pypdf text + Camelot Markdown tables.
+    """Read page text from *pdf_path* using Camelot Markdown tables.
 
     Parameters
     ----------
@@ -188,18 +282,21 @@ def extract_pages(pdf_path: str, max_pages: int = -1) -> list[dict]:
     total = len(reader.pages)
     limit = total if max_pages == -1 else min(max_pages, total)
     label = "all" if max_pages == -1 else f"first {limit}"
-    print(f"  [A] {total} pages total — processing {label}")
+    out_dir = _camelot_output_dir(pdf_path)
+    print(f"  [A] {total} pages total — processing {label} with Camelot")
+    print(f"      Camelot page dumps → {out_dir}")
     for i in range(limit):
         pnum = i + 1
-        text = reader.pages[i].extract_text() or ""
-        table_text = _camelot_table_text(pdf_path, pnum)
-        enriched_text = text
-        if table_text:
-            enriched_text = f"{text}\n\nCAMELOT TABLE VIEW:\n{table_text}"
+        table_text, table_count, flavor = _render_camelot_page(pdf_path, pnum)
+        saved_path = _save_camelot_page_text(pdf_path, pnum, table_text)
+        print(
+            f"      Page {pnum}/{total}: {table_count} table(s)"
+            f"{f' via {flavor}' if flavor else ''} → {saved_path.name}"
+        )
         pages.append({
             "page_number": pnum,
-            "text": enriched_text,
-            "raw_text": text,
+            "text": table_text,
+            "raw_text": table_text,
             "table_text": table_text,
         })
     return pages
@@ -210,7 +307,6 @@ def extract_pages(pdf_path: str, max_pages: int = -1) -> list[dict]:
 # Add entries here for any column that should ONLY be extracted when its header
 # is detected on the page.
 CONDITIONAL_FIELDS: dict[str, list[str]] = {
-    "Nature of Applicant": ["Nature of Applicant"],
 }
 
 
@@ -308,6 +404,7 @@ def run_single_pdf(
             pages_skipped += 1
             continue
 
+        active_fields = _ensure_nature_field(active_fields)
         print(f"  [B] Page {pnum:>3}: PASS ✓  fields={active_fields}")
         pages_passed += 1
 
@@ -326,6 +423,7 @@ def run_single_pdf(
 
         # Blank out conditional fields not detected on this page
         raw_rows = _blank_conditional_fields(raw_rows, active_fields)
+        raw_rows = _backfill_nature_of_applicant(raw_rows, text)
         raw_rows = route_applications_under_52_rows(raw_rows, text)
         raw_rows   = dedup_dicts(raw_rows)
         validated  = validate_rows(raw_rows)
