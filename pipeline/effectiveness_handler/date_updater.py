@@ -52,8 +52,8 @@ logger = logging.getLogger(__name__)
 #   d Month yyyy  (e.g. "15 March 2026")
 
 _DATE_PATTERNS = [
-    (r"\b(\d{2})[./-](\d{2})[./-](\d{4})\b", "%d.%m.%Y"),
-    (r"\b(\d{4})[./-](\d{2})[./-](\d{2})\b", "%Y.%m.%d"),
+    (r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b", "%d.%m.%Y"),
+    (r"\b(\d{4})[./-](\d{1,2})[./-](\d{1,2})\b", "%Y.%m.%d"),
 ]
 
 _MONTH_NAMES = {
@@ -67,7 +67,8 @@ _MONTH_NAMES = {
 def parse_date(raw: Optional[str]) -> Optional[date]:
     """Parse a date string into a Python ``date`` object.
 
-    Returns None if the string is empty, unparseable, or clearly invalid.
+    Returns the latest parsed date, or None if the string is empty,
+    unparseable, or clearly invalid.
     """
     if raw is None:
         return None
@@ -78,40 +79,45 @@ def parse_date(raw: Optional[str]) -> Optional[date]:
     # Normalise separators to dots for consistent parsing
     normalised = text.replace("/", ".").replace("-", ".")
 
+    parsed: list[date] = []
+
     # Attempt dd.mm.yyyy or yyyy.mm.dd
     for pattern, fmt in _DATE_PATTERNS:
-        m = re.search(pattern, normalised)
-        if m:
+        for m in re.finditer(pattern, normalised):
+            value = m.group(0)
+            if fmt == "%d.%m.%Y":
+                day, month, year = m.groups()
+                if len(year) == 2:
+                    value = f"{day}.{month}.20{year}"
             try:
-                return datetime.strptime(m.group(0), fmt).date()
+                parsed.append(datetime.strptime(value, fmt).date())
             except ValueError:
                 continue
 
     # Attempt "d Month yyyy" style
-    m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b", text)
-    if m:
+    for m in re.finditer(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b", text):
         day = int(m.group(1))
         month_name = m.group(2).lower()
         year = int(m.group(3))
         month = _MONTH_NAMES.get(month_name)
         if month:
             try:
-                return date(year, month, day)
+                parsed.append(date(year, month, day))
             except ValueError:
                 pass
 
-    return None
+    return max(parsed) if parsed else None
 
 
 def _yes_no(d: Optional[date]) -> Optional[str]:
     """Determine GNA Operationalization (Yes/No) from a date.
 
-    • Yes — if the date is in the future (GNA not yet operationalized)
-    • No  — if the date is today or in the past (already operationalized)
+    • Yes — if the date is today or in the past (already operationalized)
+    • No  — if the date is in the future (not yet operationalized)
     """
     if d is None:
         return None
-    return "Yes" if d > date.today() else "No"
+    return "Yes" if d <= date.today() else "No"
 
 
 def _format_date(d: date) -> str:

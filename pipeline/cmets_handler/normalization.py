@@ -130,34 +130,57 @@ def derive_enhancement_id(enh, gna, lta, mode) -> Optional[str]:
 
 
 # ── extract_date ─────────────────────────────────────────────────────────────
-def extract_date(v: Optional[str]) -> Optional[str]:
-    """Extract and normalise a date string from text."""
+def _parse_dates(v: Optional[str]) -> list[datetime]:
+    """Parse all supported dates from text."""
     v = clean(v)
     if not v:
+        return []
+
+    parsed: list[datetime] = []
+
+    for match in re.finditer(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b", v):
+        day, month, year = match.groups()
+        if len(year) == 2:
+            year = "20" + year
+        try:
+            parsed.append(datetime(int(year), int(month), int(day)))
+        except ValueError:
+            pass
+
+    for match in re.finditer(r"\b(\d{4})[./-](\d{1,2})[./-](\d{1,2})\b", v):
+        year, month, day = match.groups()
+        try:
+            parsed.append(datetime(int(year), int(month), int(day)))
+        except ValueError:
+            pass
+
+    for match in re.finditer(r"\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b", v):
+        for fmt in ("%d %b %Y", "%d %B %Y"):
+            try:
+                parsed.append(datetime.strptime(match.group(0), fmt))
+                break
+            except ValueError:
+                pass
+
+    return parsed
+
+
+def extract_date(v: Optional[str]) -> Optional[str]:
+    """Extract, normalise, and return the latest date as DD.MM.YYYY."""
+    dates = _parse_dates(v)
+    if not dates:
         return None
-    for pat in (r"\b\d{2}[./-]\d{2}[./-]\d{4}\b",
-                r"\b\d{4}[./-]\d{2}[./-]\d{2}\b",
-                r"\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b"):
-        m = re.search(pat, v)
-        if m:
-            return m.group(0)
-    return None
+    return max(dates).strftime("%d.%m.%Y")
 
 
 # ── gna_yes_no ───────────────────────────────────────────────────────────────
 def gna_yes_no(date_str: Optional[str]) -> Optional[str]:
-    """Determine Yes/No based on whether GNA date is in the future."""
+    """Determine Yes/No based on whether GNA date is operationalized."""
     d = extract_date(date_str)
     if not d:
         return None
-    norm = d.replace("/", ".").replace("-", ".")
-    for fmt in ("%d.%m.%Y", "%Y.%m.%d"):
-        try:
-            dt = datetime.strptime(norm, fmt)
-            return "Yes" if dt.date() > datetime.now().date() else "No"
-        except ValueError:
-            pass
-    return None
+    dt = datetime.strptime(d, "%d.%m.%Y")
+    return "Yes" if dt.date() <= datetime.now().date() else "No"
 
 
 # ── norm_status ──────────────────────────────────────────────────────────────

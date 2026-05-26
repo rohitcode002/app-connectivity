@@ -53,6 +53,7 @@ SKIP RULES — DO NOT extract rows if:
     If you detect ANY GNARE column, return {{"rows": []}}.
 - For "GNA Operationalization Date" look near SCoD/SCOD terms.
 - For "GNA Operationalization (Yes/No)" return null (computed in post-processing).
+- If multiple dates appear for one date field, post-processing keeps the latest parsed date.
 - For "Status of application..." map wording to only: Withdrawn / granted / Revoked / Applied.
   Treat revoked/cancelled/rejected as Revoked; treat missing status, pending/submitted/under process as Applied.
 - PSP values: fill only when pump storage / PSP wording is explicitly present.

@@ -377,7 +377,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         data_source="calculated",
         derived_from="GNA Operationalization Date",
         norm_func="gna_yes_no",
-        description="Yes if GNA Operationalization Date is in the future, No otherwise",
+        description="Yes if GNA Operationalization Date is today/past, No if it is future",
     ),
 ]
 

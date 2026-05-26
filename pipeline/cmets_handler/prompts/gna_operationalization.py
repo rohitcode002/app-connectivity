@@ -25,6 +25,7 @@ VARIANTS = {
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
 GNA Operationalization Date: look near SCoD / SCOD terms in the description text.
+If multiple dates appear in this field, the post-processor will keep the latest parsed date.
 GNA Operationalization (Yes/No): return null — this is computed in post-processing."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────

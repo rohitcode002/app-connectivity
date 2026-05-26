@@ -97,12 +97,12 @@ For each CMETS row matched to an effectiveness record:
 │                                                                 │
 │  Then recompute "GNA Operationalization (Yes/No)":              │
 │  ┌─────────────────────────────────┬──────────────────────────┐ │
-│  │ Final date is in the FUTURE     │ → "Yes"                  │ │
-│  │ Final date is TODAY or PAST     │ → "No"                   │ │
+│  │ Final date is TODAY or PAST     │ → "Yes"                  │ │
+│  │ Final date is in the FUTURE     │ → "No"                   │ │
 │  └─────────────────────────────────┴──────────────────────────┘ │
 │                                                                 │
-│  "Yes" = GNA not yet operationalized                            │
-│  "No"  = GNA already operationalized                            │
+│  "Yes" = GNA already operationalized                            │
+│  "No"  = GNA not yet operationalized                            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

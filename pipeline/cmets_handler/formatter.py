@@ -8,7 +8,6 @@ downstream mapping consumes the CMETS data.
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +20,7 @@ from pipeline.excel_utils import (
     _get_openpyxl,
 )
 from pipeline.cmets_handler.normalization import INDIA_STATES_UTS, clean
+from pipeline.cmets_handler.normalization import extract_date, gna_yes_no
 
 
 CAPACITY_COLUMNS = [
@@ -80,36 +80,7 @@ def _numbers_only(value: Any, *, min_digits: int = 1) -> str | None:
 
 
 def _format_date(value: Any) -> str | None:
-    text = _text(value)
-    if not text:
-        return None
-
-    matchers = [
-        (r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b", ("%d", "%m", "%Y")),
-        (r"\b(\d{4})[./-](\d{1,2})[./-](\d{1,2})\b", ("%Y", "%m", "%d")),
-    ]
-    for pattern, order in matchers:
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        parts = dict(zip(order, match.groups()))
-        year = parts["%Y"]
-        if len(year) == 2:
-            year = "20" + year
-        try:
-            dt = datetime(int(year), int(parts["%m"]), int(parts["%d"]))
-            return dt.strftime("%d.%m.%Y")
-        except ValueError:
-            pass
-
-    match = re.search(r"\b\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}\b", text)
-    if match:
-        for fmt in ("%d %b %Y", "%d %B %Y"):
-            try:
-                return datetime.strptime(match.group(0), fmt).strftime("%d.%m.%Y")
-            except ValueError:
-                pass
-    return None
+    return extract_date(_text(value))
 
 
 def _format_state(value: Any) -> str | None:
@@ -142,15 +113,6 @@ def _format_substation(value: Any) -> str | None:
     text = re.sub(r"\s+([,;)])", r"\1", text)
     text = re.sub(r"([(,;])\s+", r"\1", text)
     return text.strip(" -;,") or None
-
-
-def _format_yes_no(value: Any) -> str | None:
-    text = _text(value).lower()
-    if text.startswith("y"):
-        return "Yes"
-    if text.startswith("n"):
-        return "No"
-    return None
 
 
 def _format_status(value: Any) -> str | None:
@@ -295,7 +257,7 @@ def format_cmets_excel(source_path: str | Path, output_path: str | Path | None =
             row_idx,
             headers,
             "GNA Operationalization (Yes/No)",
-            _format_yes_no(_get(ws, row_idx, headers, "GNA Operationalization (Yes/No)")),
+            gna_yes_no(_get(ws, row_idx, headers, "GNA Operationalization Date")),
         )
         _set(
             ws,

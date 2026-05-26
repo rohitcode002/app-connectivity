@@ -230,15 +230,16 @@ The **Type** field goes through a multi-stage pipeline with strict rules:
 │                                                          │
 │  5. Recompute Yes/No from the final date:                │
 │     ┌───────────────────────────────┬──────────────────┐ │
-│     │ Final date is in the FUTURE   │ → "Yes"          │ │
-│     │ Final date is TODAY or PAST   │ → "No"           │ │
+│     │ Final date is TODAY or PAST   │ → "Yes"          │ │
+│     │ Final date is in the FUTURE   │ → "No"           │ │
 │     └───────────────────────────────┴──────────────────┘ │
 │                                                          │
-│  "Yes" = GNA not yet operationalized (future date)       │
-│  "No"  = GNA already operationalized (past/today date)   │
+│  "Yes" = GNA already operationalized (past/today date)   │
+│  "No"  = GNA not yet operationalized (future date)       │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ### Date Output Format
 
-All dates are written in Indian convention: **dd.mm.yyyy** (e.g. "31.03.2030")
+All dates are written in Indian convention: **dd.mm.yyyy** (e.g. "31.03.2030").
+When multiple dates appear in one field, the latest parsed date is selected.
