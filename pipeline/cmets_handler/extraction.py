@@ -266,7 +266,11 @@ def _backfill_nature_of_applicant(raw_rows: list[dict], page_text: str) -> list[
 
 # ── Sub-layer A: PDF page extraction ──────────────────────────────────────────
 
-def extract_pages(pdf_path: str, max_pages: int = -1) -> list[dict]:
+def extract_pages(
+    pdf_path: str,
+    max_pages: int = -1,
+    save_camelot_dumps: bool = False,
+) -> list[dict]:
     """Read page text from *pdf_path* using Camelot Markdown tables.
 
     Parameters
@@ -282,17 +286,24 @@ def extract_pages(pdf_path: str, max_pages: int = -1) -> list[dict]:
     total = len(reader.pages)
     limit = total if max_pages == -1 else min(max_pages, total)
     label = "all" if max_pages == -1 else f"first {limit}"
-    out_dir = _camelot_output_dir(pdf_path)
     print(f"  [A] {total} pages total — processing {label} with Camelot")
-    print(f"      Camelot page dumps → {out_dir}")
+    if save_camelot_dumps:
+        out_dir = _camelot_output_dir(pdf_path)
+        print(f"      Camelot page dumps → {out_dir}")
     for i in range(limit):
         pnum = i + 1
         table_text, table_count, flavor = _render_camelot_page(pdf_path, pnum)
-        saved_path = _save_camelot_page_text(pdf_path, pnum, table_text)
-        print(
-            f"      Page {pnum}/{total}: {table_count} table(s)"
-            f"{f' via {flavor}' if flavor else ''} → {saved_path.name}"
-        )
+        if save_camelot_dumps:
+            saved_path = _save_camelot_page_text(pdf_path, pnum, table_text)
+            print(
+                f"      Page {pnum}/{total}: {table_count} table(s)"
+                f"{f' via {flavor}' if flavor else ''} → {saved_path.name}"
+            )
+        else:
+            print(
+                f"      Page {pnum}/{total}: {table_count} table(s)"
+                f"{f' via {flavor}' if flavor else ''}"
+            )
         pages.append({
             "page_number": pnum,
             "text": table_text,
@@ -387,7 +398,7 @@ def run_single_pdf(
     max_pages: int = -1,
 ) -> PipelineResult:
     """Run sub-layers A→B→C for a single PDF and return PipelineResult."""
-    pages         = extract_pages(pdf_path, max_pages=max_pages)
+    pages         = extract_pages(pdf_path, max_pages=max_pages, save_camelot_dumps=False)
     results       = []
     pages_passed  = 0
     pages_skipped = 0
