@@ -545,6 +545,11 @@ def _row_application_ids(row: dict) -> set[str]:
     return ids
 
 
+def _row_pdf_key(row: dict) -> str:
+    """Return the source PDF key used to scope CMETS duplicate removal."""
+    return clean(row.get("PDF")) or ""
+
+
 def _merge_id_cell(existing: object, incoming: object) -> object:
     """Append incoming IDs to an existing comma-separated ID cell."""
     existing_clean = clean(existing)
@@ -592,13 +597,13 @@ def _merge_into_later_row(current: dict, later: dict) -> None:
 
 
 def consolidate_application_duplicates(rows: list[dict]) -> list[dict]:
-    """Collapse later CMETS duplicate application rows before mapping.
+    """Collapse later duplicate application rows within the same CMETS PDF.
 
     For each row, check whether any of its GNA/LTA/5.2 application IDs appears
-    in a later row. If yes, carry the current row's non-empty data into that
-    later row where the later row is blank, then remove the current row. This
-    keeps the newest/upcoming row while preserving useful values from the older
-    duplicate row.
+    in a later row from the same PDF. If yes, carry the current row's non-empty
+    data into that later row where the later row is blank, then remove the
+    current row. This keeps the newest/upcoming row in that PDF while preserving
+    useful values from the older duplicate row.
     """
     if not rows:
         return rows
@@ -612,9 +617,14 @@ def consolidate_application_duplicates(rows: list[dict]) -> list[dict]:
         current_ids = _row_application_ids(current)
         if not current_ids:
             continue
+        current_pdf = _row_pdf_key(current)
+        if not current_pdf:
+            continue
 
         for j in range(i + 1, len(consolidated)):
             if j in removed:
+                continue
+            if _row_pdf_key(consolidated[j]) != current_pdf:
                 continue
             if current_ids.intersection(_row_application_ids(consolidated[j])):
                 _merge_into_later_row(current, consolidated[j])
