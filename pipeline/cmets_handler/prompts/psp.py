@@ -23,7 +23,16 @@ VARIANTS = {
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
-Fill ONLY when pump storage / PSP wording is explicitly present in the row."""
+Fill ONLY when pump storage / PSP wording is explicitly present in the row.
+Detection: check both "Nature of Applicant" and "Type" fields for
+  keywords like "Pumped Storage", "PSP", "pump storage".
+- PSP Injection (MW): look for "Max Injection", "Injection" values
+  in PSP-context rows. Extract the numeric MW value.
+- PSP Drawl (MW): look for "Max Drawl", "Drawal", "Drawl" values
+  in PSP-context rows. Extract the numeric MW value.
+- PSP MWh: MWh capacity if explicitly stated.
+IMPORTANT: if PSP values are populated for a row, Battery Injection (MW)
+  must be cleared (set to null) — PSP injection takes precedence."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
 JSON_EXAMPLE = [

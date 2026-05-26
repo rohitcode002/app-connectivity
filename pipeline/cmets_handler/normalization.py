@@ -344,15 +344,50 @@ def norm_status(v: Optional[str]) -> Optional[str]:
 
 
 # ── PSP columns ─────────────────────────────────────────────────────────────
-def psp_cols(*vals: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Extract PSP MWh/Injection/Drawl from combined text (only when PSP context present)."""
-    text = " ".join(str(v or "") for v in vals)
-    if not re.search(r"\b(pump\s*storage|psp)\b", text, re.IGNORECASE):
+
+_PSP_DETECT_RE = re.compile(
+    r"\b(pump\s*(?:ed)?\s*storage|psp)\b", re.IGNORECASE
+)
+
+_PSP_INJ_RE = re.compile(
+    r"(?:max(?:imum)?\s*)?injection\s*[:\-]?\s*(\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_PSP_DRW_RE = re.compile(
+    r"(?:max(?:imum)?\s*)?(?:drawl|drawal)\s*[:\-]?\s*(\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_PSP_MWH_RE_1 = re.compile(
+    r"for\s+(\d+(?:\.\d+)?)\s*(?:MWh|MW)", re.IGNORECASE,
+)
+_PSP_MWH_RE_2 = re.compile(
+    r"(\d+(?:\.\d+)?)\s*MWh", re.IGNORECASE,
+)
+
+
+def psp_cols(
+    *vals: Optional[str],
+    row_context: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Extract PSP MWh/Injection/Drawl from combined text.
+
+    Detection checks both the direct PSP fields AND the broader
+    row_context (Nature of Applicant, Type, quantum, etc.) for
+    keywords like "Pumped Storage", "PSP", "pump storage".
+    """
+    # Narrow text from direct PSP fields
+    narrow = " ".join(str(v or "") for v in vals)
+    # Broader context for PSP keyword detection
+    full = narrow + (" " + row_context if row_context else "")
+
+    if not _PSP_DETECT_RE.search(full):
         return None, None, None
-    mwh_m   = re.search(r"for\s+(\d+(?:\.\d+)?)\s*(?:MWh|MW)", text, re.IGNORECASE) or \
-              re.search(r"(\d+(?:\.\d+)?)\s*MWh", text, re.IGNORECASE)
-    inj_m   = re.search(r"(?:max\s*)?injection\s*[:\-]?\s*(\d+(?:\.\d+)?)", text, re.IGNORECASE)
-    drawl_m = re.search(r"(?:max\s*)?(?:drawl|drawal)\s*[:\-]?\s*(\d+(?:\.\d+)?)", text, re.IGNORECASE)
+
+    # Parse values from the full context so we catch "Max Injection: 100"
+    # even if it appears in nature/type/quantum columns
+    mwh_m   = _PSP_MWH_RE_1.search(full) or _PSP_MWH_RE_2.search(full)
+    inj_m   = _PSP_INJ_RE.search(full)
+    drawl_m = _PSP_DRW_RE.search(full)
     return (mwh_m.group(1) if mwh_m else None,
             inj_m.group(1) if inj_m else None,
             drawl_m.group(1) if drawl_m else None)
@@ -645,19 +680,36 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         p["Status of application(Withdrawn / granted. Revoked.)"] = norm_status(raw_stat)
 
         # ── PSP columns (multi-field derivation) ─────────────────────────
-        mwh, inj, drw = psp_cols(raw_psp_mwh, raw_psp_inj, raw_psp_drw, raw_mode)
+        # Build row context early so both PSP and Battery can use it
+        row_context = " ".join(str(v or "") for v in p.values())
+        mwh, inj, drw = psp_cols(
+            raw_psp_mwh, raw_psp_inj, raw_psp_drw, raw_mode,
+            row_context=row_context,
+        )
         p["PSP MWh"]            = clean(mwh or raw_psp_mwh)
         p["PSP Injection (MW)"] = clean(inj or raw_psp_inj)
         p["PSP Drawl (MW)"]     = clean(drw or raw_psp_drw)
 
         # ── Battery (BESS) columns (multi-field derivation) ──────────────
+        # row_context already built above for duration pattern matching
         bat_mwh, bat_inj, bat_drw = extract_battery_values(
             raw_bat_mwh, raw_bat_inj, raw_bat_drw, raw_mode,
             p.get("Type", ""),
+            row_context=row_context,
         )
         p["Battery MWh"]            = clean(bat_mwh or raw_bat_mwh)
         p["Battery Injection (MW)"] = clean(bat_inj or raw_bat_inj)
         p["Battery Drawl (MW)"]     = clean(bat_drw or raw_bat_drw)
+
+        # ── PSP overrides Battery Injection ───────────────────────────────
+        # If PSP values are populated, battery injection is cleared because
+        # the injection/drawl belongs to pump storage, not BESS.
+        psp_has_values = bool(
+            clean(p["PSP Injection (MW)"]) or clean(p["PSP Drawl (MW)"])
+        )
+        if psp_has_values:
+            p["Battery Injection (MW)"] = None
+            print(f"      [PSP Override] PSP populated → cleared Battery Injection (MW)")
 
         # ── Derived: State from Project Location ─────────────────────────
         p["State"] = extract_state(p.get("Project Location"))

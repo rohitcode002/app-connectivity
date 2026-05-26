@@ -39,6 +39,11 @@ VARIANTS = {
 RULE = """\
 Fill ONLY when BESS / Battery context is present in the row.
 - Battery MWh: MWh capacity of the battery.
+  DURATION FORMULA: If a duration is found in the text such as "4 hours",
+  "four (4) hours", "2 hrs", etc., and Battery Injection (MW) is known but
+  Battery MWh is NOT explicitly stated, then compute:
+      Battery MWh = Battery Injection (MW) × duration_hours
+  For example: 50 MW injection with "4 hours" → Battery MWh = 200.
 - Battery Injection (MW): injection is typically SMALLER than drawl for BESS.
   Look for "Injection" or "Inj" in BESS tables.
 - Battery Drawl (MW): drawl is typically LARGER than injection for BESS.

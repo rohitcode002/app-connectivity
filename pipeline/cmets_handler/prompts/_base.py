@@ -57,7 +57,12 @@ SKIP RULES — DO NOT extract rows if:
 - For "Status of application..." map wording to only: Withdrawn / granted / Revoked / Applied.
   Treat revoked/cancelled/rejected as Revoked; treat missing status, pending/submitted/under process as Applied.
 - PSP values: fill only when pump storage / PSP wording is explicitly present.
+  Detect PSP from "Nature of Applicant" (e.g. "Pumped Storage") or "Type" fields.
+  Look for "Max Injection" and "Max Drawl" / "Drawal" values in PSP-context rows.
+  IMPORTANT: if PSP Injection/Drawl are populated, set Battery Injection (MW) to null.
 - Battery values: fill only when BESS / Battery wording is explicitly present.
+  If a duration is found in the text (e.g. "4 hours", "four (4) hours") and
+  Battery MWh is NOT explicitly stated, compute: Battery MWh = Battery Injection (MW) × duration_hours.
 - "type" MUST be strictly one of these keywords: Solar, BESS, Wind, Solar+Wind, Solar+BESS
   with associated MW values in parentheses if present.
   Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar+Wind (500)", "BESS (50)", or null.
