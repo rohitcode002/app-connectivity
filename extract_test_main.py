@@ -33,7 +33,7 @@ import sys
 # =============================================================================
 
 PDF_PATH = "42th.pdf"       # <- hardcoded PDF filename / path
-CAMELOT_FLAVOR = "lattice"    # 'lattice' (bordered tables) | 'stream' (whitespace tables)
+CAMELOT_FLAVOR = "auto"     # 'auto' tries lattice then stream | 'lattice' | 'stream'
 
 # =============================================================================
 
@@ -103,6 +103,20 @@ def rows_to_markdown(rows: list) -> str:
     return "\n".join(lines)
 
 
+def read_camelot_tables(camelot, pdf_path: str, page_num: int, flavor: str):
+    flavors = ("lattice", "stream") if flavor == "auto" else (flavor,)
+    last_error = ""
+    for candidate in flavors:
+        try:
+            tables = camelot.read_pdf(pdf_path, pages=str(page_num), flavor=candidate)
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+        if tables and len(tables) > 0:
+            return tables, candidate, ""
+    return [], "", last_error
+
+
 # -- pdfplumber extraction ----------------------------------------------------
 
 def extract_with_pdfplumber(pdf_path: str, root_dir: str) -> None:
@@ -166,21 +180,22 @@ def extract_with_camelot(pdf_path: str, root_dir: str, flavor: str = "lattice") 
         label = page_label(page_num, total)
         lines = []
 
-        try:
-            tables = camelot.read_pdf(pdf_path, pages=str(page_num), flavor=flavor)
-        except Exception as exc:
-            lines.append(f"ERROR reading page {page_num}: {exc}")
-            tables = []
+        tables, used_flavor, error = read_camelot_tables(camelot, pdf_path, page_num, flavor)
 
         if len(tables) == 0:
             lines.append(f"{'='*60}")
-            lines.append(f"PAGE {page_num} — no tables detected")
+            lines.append(f"PAGE {page_num} — no Camelot tables detected")
             lines.append(f"{'='*60}")
+            if error:
+                lines.append(f"Camelot error: {error}")
         else:
             for t_idx, table in enumerate(tables, start=1):
                 acc = table.parsing_report.get("accuracy", "n/a")
                 lines.append(f"{'='*60}")
-                lines.append(f"PAGE {page_num} — TABLE {t_idx}  (accuracy: {acc})")
+                lines.append(
+                    f"PAGE {page_num} — TABLE {t_idx}  "
+                    f"(accuracy: {acc}, flavor: {used_flavor})"
+                )
                 lines.append(f"{'='*60}")
                 # Convert DataFrame to list-of-lists for the Markdown renderer
                 rows = [table.df.columns.tolist()] + table.df.values.tolist()
@@ -191,7 +206,8 @@ def extract_with_camelot(pdf_path: str, root_dir: str, flavor: str = "lattice") 
             f.write("\n".join(lines))
 
         print(f"  Page {page_num}/{total} -> {os.path.basename(out_file)}  "
-              f"({len(tables)} table(s) found)")
+              f"({len(tables)} table(s) found"
+              f"{f' via {used_flavor}' if used_flavor else ''})")
 
     print("[camelot]   Done.\n")
 
