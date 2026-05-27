@@ -49,6 +49,8 @@ from pipeline.token_usage import record_llm_token_usage
 
 logger = logging.getLogger(__name__)
 MODEL = "gpt-4o-mini"
+_START_DIR = Path(__file__).resolve().parent.parent.parent
+_BAY_PAGE_TEXT_ROOT = _START_DIR / "temp" / "bayallocation_pages"
 
 BAY_LLM_SYSTEM_PROMPT = """You extract CTUIL Bay Allocation table data from one PDF page.
 Return only valid JSON. Do not include markdown fences or commentary.
@@ -149,6 +151,25 @@ def _clean(text) -> str:
 def _compact(text: str) -> str:
     """Lowercase text and remove non-alphanumerics for PDF header matching."""
     return re.sub(r"[^a-z0-9]+", "", (text or "").lower())
+
+
+def _safe_path_part(value: str) -> str:
+    value = re.sub(r"[^\w .()&+-]+", "_", value.strip())
+    value = re.sub(r"\s+", " ", value).strip(" .")
+    return value or "unknown"
+
+
+def _page_text_output_dir(pdf_path: str) -> Path:
+    pdf = Path(pdf_path)
+    return _BAY_PAGE_TEXT_ROOT / _safe_path_part(pdf.stem)
+
+
+def _save_page_text(pdf_path: str, page_number: int, page_text: str) -> Path:
+    dest = _page_text_output_dir(pdf_path)
+    dest.mkdir(parents=True, exist_ok=True)
+    out_file = dest / f"page {page_number}.txt"
+    out_file.write_text(page_text, encoding="utf-8")
+    return out_file
 
 
 def _is_target_table(table: list) -> bool:
@@ -671,6 +692,24 @@ def _rows_to_table_text(rows: list[list[str]], label: str = "table 1") -> str:
     return "\n".join(chunks)[:50000]
 
 
+def _camelot_page_text(
+    pdf_path: str,
+    page_number: int,
+    camelot_tables,
+    flavor: str,
+) -> str:
+    """Render one page's Camelot tables to the saved text format used by LLM."""
+    rows = _camelot_to_raw_rows(camelot_tables)
+    lines = [
+        "=" * 60,
+        f"PDF: {Path(pdf_path).name}",
+        f"PAGE {page_number} — CAMELOT {flavor or 'unknown'}",
+        "=" * 60,
+        _rows_to_table_text(rows, f"camelot {flavor or 'unknown'}"),
+    ]
+    return "\n".join(lines).strip()[:50000]
+
+
 def _page_table_text(page) -> str:
     """Render pdfplumber table cells as compact tab-separated text for fallback LLM input."""
     chunks: list[str] = []
@@ -908,23 +947,34 @@ def extract_page_data(page, page_number: int, pdf_path: str = "", runtime=None) 
     camelot_rows: list[list[str]] = []
     table_text = ""
 
-    # ── Primary: Camelot table extraction, then LLM row extraction ─────────
+    # ── Primary: Camelot table extraction → .txt dump → LLM row extraction ─
     if pdf_path and _HAS_CAMELOT:
         camelot_tables, flavor = _camelot_extract_tables(pdf_path, page_number)
         if camelot_tables:
             raw_rows = _camelot_to_raw_rows(camelot_tables)
             if raw_rows:
-                table_text = _rows_to_table_text(raw_rows, f"camelot {flavor}")
-                llm_result = llm_extract_page_data(
-                    page_text,
-                    table_text,
-                    page_number,
-                    runtime,
-                    pdf_name=Path(pdf_path).name if pdf_path else "",
+                table_text = _camelot_page_text(pdf_path, page_number, camelot_tables, flavor)
+                saved_path = _save_page_text(pdf_path, page_number, table_text)
+                txt_text = saved_path.read_text(encoding="utf-8")
+                print(
+                    f"  + Page {page_number:3d} camelot text saved "
+                    f"({len(txt_text)} chars) -> {saved_path}"
                 )
-                if llm_result is not None:
-                    llm_result["extraction_method"] = f"camelot_{flavor}+llm"
-                    return llm_result
+                if page_passes_gate(txt_text):
+                    llm_result = llm_extract_page_data(
+                        "",
+                        txt_text,
+                        page_number,
+                        runtime,
+                        pdf_name=Path(pdf_path).name if pdf_path else "",
+                    )
+                    if llm_result is not None:
+                        llm_result["raw_text"] = txt_text
+                        llm_result["page_text_file"] = str(saved_path)
+                        llm_result["extraction_method"] = f"camelot_{flavor}+llm"
+                        return llm_result
+                else:
+                    print(f"  o Page {page_number:3d} -- LLM skipped (saved txt keyword gate)")
 
             if _is_target_table(raw_rows):
                 camelot_rows = raw_rows
@@ -945,16 +995,33 @@ def extract_page_data(page, page_number: int, pdf_path: str = "", runtime=None) 
                 target = extracted
                 extraction_method = "pdfplumber_fallback"
                 table_text = _rows_to_table_text(extracted, "pdfplumber fallback")
-                llm_result = llm_extract_page_data(
-                    page_text,
-                    table_text or _page_table_text(page),
-                    page_number,
-                    runtime,
-                    pdf_name=Path(pdf_path).name if pdf_path else "",
+                saved_path = _save_page_text(pdf_path, page_number, table_text) if pdf_path else None
+                txt_text = (
+                    saved_path.read_text(encoding="utf-8")
+                    if saved_path
+                    else table_text or _page_table_text(page)
                 )
-                if llm_result is not None:
-                    llm_result["extraction_method"] = "pdfplumber_fallback+llm"
-                    return llm_result
+                if saved_path:
+                    print(
+                        f"  + Page {page_number:3d} pdfplumber text saved "
+                        f"({len(txt_text)} chars) -> {saved_path}"
+                    )
+                if page_passes_gate(txt_text):
+                    llm_result = llm_extract_page_data(
+                        "",
+                        txt_text,
+                        page_number,
+                        runtime,
+                        pdf_name=Path(pdf_path).name if pdf_path else "",
+                    )
+                    if llm_result is not None:
+                        llm_result["raw_text"] = txt_text
+                        if saved_path:
+                            llm_result["page_text_file"] = str(saved_path)
+                        llm_result["extraction_method"] = "pdfplumber_fallback+llm"
+                        return llm_result
+                else:
+                    print(f"  o Page {page_number:3d} -- LLM skipped (saved txt keyword gate)")
                 break
 
     if target is None:
@@ -1148,15 +1215,11 @@ def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1, runtime=None) 
         limit = total if max_pages == -1 else min(max_pages, total)
         label = "all" if max_pages == -1 else f"first {limit} of"
         print(f"  [BayAllocation] {total} pages ({label}) -- scanning ...")
+        print(f"      Page txt dumps -> {_page_text_output_dir(pdf_path)}")
 
         for i in range(limit):
             page = pdf.pages[i]
             page_number = i + 1
-            text = page.extract_text() or ""
-
-            if not page_passes_gate(text):
-                print(f"  o Page {page_number:3d} -- skipped (keyword gate)")
-                continue
 
             result = extract_page_data(page, page_number, pdf_path=pdf_path, runtime=runtime)
             if result is None:
