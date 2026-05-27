@@ -2,7 +2,8 @@
 bayallocation_handler/runner.py — Bay Allocation Orchestration (Module 5)
 ==========================================================================
 Discovers all Bay Allocation PDFs in source/bayallocation/, checks a JSON
-cache, extracts un-cached PDFs, and writes per-PDF and combined JSON output.
+cache, extracts un-cached PDFs, writes per-PDF JSON output, and incrementally
+appends/upserts each PDF into the Excel workbook.
 
 Each page of a PDF is treated as one independent extraction unit.
 
@@ -15,14 +16,21 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Optional
 
 import pandas as pd
 
 from config import RuntimeConfig, load_runtime_config
-from pipeline.excel_utils import export_to_excel
+from pipeline.excel_utils import (
+    _apply_data_style,
+    _apply_header_style,
+    _autosize_columns,
+    _get_openpyxl,
+    export_to_excel,
+)
 from pipeline.bayallocation_handler.extraction import (
     extract_bayallocation_image,
     extract_bayallocation_pdf,
@@ -130,6 +138,106 @@ def _flatten(all_results: list[dict]) -> list[dict]:
     return flat
 
 
+def _agg_stats(all_results: list[dict]) -> dict:
+    """Compute aggregate stats from processed Bay Allocation PDFs."""
+    flat_rows = _flatten(all_results)
+    return {
+        "pdfs_processed": len(all_results),
+        "pages_matched": sum(r.get("total_pages", 0) for r in all_results),
+        "substations": sum(r.get("total_substations", 0) for r in all_results),
+        "bay_entries": len(flat_rows),
+    }
+
+
+def _ensure_excel_workbook(xlsx: Path) -> Path:
+    """Create the Bay Allocation workbook with headers if needed."""
+    if xlsx.exists():
+        return xlsx.resolve()
+
+    opx = _get_openpyxl()
+    wb = opx.Workbook()
+    ws = wb.active
+    ws.title = "Bay Allocation Data"
+    ws.append(EXCEL_COLUMNS)
+    ws.freeze_panes = "A2"
+    _apply_header_style(ws, opx)
+    _autosize_columns(ws)
+
+    xlsx.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(xlsx)
+    return xlsx
+
+
+def _remove_existing_pdf_rows(ws, source_pdf: str) -> int:
+    """Delete stale rows for this PDF before appending current rows."""
+    if ws.max_row < 2:
+        return 0
+
+    headers = [cell.value for cell in ws[1]]
+    if "Source" not in headers:
+        return 0
+
+    source_col = headers.index("Source") + 1
+    target_name = Path(source_pdf).name
+    removed = 0
+    for row_idx in range(ws.max_row, 1, -1):
+        value = ws.cell(row=row_idx, column=source_col).value
+        if value and Path(str(value)).name == target_name:
+            ws.delete_rows(row_idx, 1)
+            removed += 1
+    return removed
+
+
+def _append_pdf_to_excel(
+    data: dict,
+    xlsx: Path,
+    started_at: datetime,
+    updated_at: datetime,
+    runtime_s: float,
+    stats: dict,
+) -> Path:
+    """Append one PDF's flattened rows into the Bay Allocation workbook."""
+    opx = _get_openpyxl()
+    if not xlsx.exists():
+        _ensure_excel_workbook(xlsx)
+
+    wb = opx.load_workbook(xlsx)
+    ws = wb["Bay Allocation Data"] if "Bay Allocation Data" in wb.sheetnames else wb.active
+    if ws.max_row == 0:
+        ws.append(EXCEL_COLUMNS)
+        _apply_header_style(ws, opx)
+
+    _remove_existing_pdf_rows(ws, data.get("source", ""))
+
+    for record in _flatten([data]):
+        ws.append([record.get(col) for col in EXCEL_COLUMNS])
+
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    _apply_header_style(ws, opx)
+    _apply_data_style(ws, opx)
+    _autosize_columns(ws)
+
+    if "Run Summary" in wb.sheetnames:
+        del wb["Run Summary"]
+    ws_summary = wb.create_sheet("Run Summary")
+    for row in [
+        ("Run started at", started_at.isoformat(timespec="seconds")),
+        ("Last updated at", updated_at.isoformat(timespec="seconds")),
+        ("Runtime so far (seconds)", round(runtime_s, 2)),
+        ("Last appended PDF", Path(data.get("source", "")).name),
+        ("PDFs processed", stats["pdfs_processed"]),
+        ("Pages matched", stats["pages_matched"]),
+        ("Substations", stats["substations"]),
+        ("Bay entries", stats["bay_entries"]),
+    ]:
+        ws_summary.append(list(row))
+    _autosize_columns(ws_summary)
+
+    wb.save(xlsx)
+    return xlsx
+
+
 # ─── Public API ───────────────────────────────────────────────────────────────
 
 def run_bayallocation_extraction(
@@ -139,7 +247,7 @@ def run_bayallocation_extraction(
     runtime:    Optional[RuntimeConfig] = None,
     max_pages:  int = -1,
 ) -> pd.DataFrame:
-    """Discover Bay Allocation PDFs → extract (skip cached) → dump JSON → write Excel.
+    """Discover Bay Allocation PDFs → extract (skip cached) → dump JSON → append Excel.
 
     Parameters
     ----------
@@ -190,14 +298,29 @@ def run_bayallocation_extraction(
     print(f"  Max pages   : {max_pages if max_pages != -1 else 'ALL'}")
     print("=" * 64)
 
+    started_at = datetime.now()
+    t0 = perf_counter()
     all_results: list[dict] = []
+    _ensure_excel_workbook(xlsx)
 
     for idx, pdf_path in enumerate(pdf_files, 1):
         cache = _cache_path(pdf_path.name, out)
 
         if cache.exists():
             print(f"\n  [{idx}/{len(pdf_files)}] SKIP    {pdf_path.name}")
-            all_results.append(_load_json(cache))
+            cached = _load_json(cache)
+            all_results.append(cached)
+            print(f"  -> JSON cache loaded: {cache.name}")
+            print(f"  -> Dumping cached JSON rows into Excel: {xlsx.name}")
+            _append_pdf_to_excel(
+                cached,
+                xlsx,
+                started_at,
+                datetime.now(),
+                perf_counter() - t0,
+                _agg_stats(all_results),
+            )
+            print(f"  -> Excel appended/verified: {xlsx.name}")
             continue
 
         print(f"\n  [{idx}/{len(pdf_files)}] EXTRACT {pdf_path.name}")
@@ -226,10 +349,22 @@ def run_bayallocation_extraction(
               f"{result['total_substations']} substations saved -> {cache.name}")
         all_results.append(result)
 
+        print(f"  -> Dumping extracted JSON rows into Excel: {xlsx.name}")
+        _append_pdf_to_excel(
+            result,
+            xlsx,
+            started_at,
+            datetime.now(),
+            perf_counter() - t0,
+            _agg_stats(all_results),
+        )
+        print(f"  -> Excel appended: {xlsx.name}")
+
     # -- Aggregate ─────────────────────────────────────────────────────────────
-    total_pdfs         = len(all_results)
-    total_pages        = sum(r.get("total_pages", 0) for r in all_results)
-    total_substations  = sum(r.get("total_substations", 0) for r in all_results)
+    stats              = _agg_stats(all_results)
+    total_pdfs         = stats["pdfs_processed"]
+    total_pages        = stats["pages_matched"]
+    total_substations  = stats["substations"]
     flat_rows          = _flatten(all_results)
 
     print("\n" + "=" * 64)
@@ -240,28 +375,12 @@ def run_bayallocation_extraction(
     print(f"    Bay entries     : {len(flat_rows)}")
     print("=" * 64)
 
+    print(f"\n[BayAllocation] Excel → {xlsx}")
+
     if not flat_rows:
         return pd.DataFrame()
 
-    df = pd.DataFrame(flat_rows)
-
-    # ── Excel export ─────────────────────────────────────────────────────────
-    col_order = [c for c in EXCEL_COLUMNS if c in df.columns]
-    export_to_excel(
-        rows         = flat_rows,
-        output_path  = xlsx,
-        sheet_name   = "Bay Allocation Data",
-        column_order = col_order,
-        summary_rows = [
-            ("PDFs processed",  total_pdfs),
-            ("Pages matched",   total_pages),
-            ("Substations",     total_substations),
-            ("Bay entries",     len(flat_rows)),
-        ],
-    )
-    print(f"\n[BayAllocation] Excel → {xlsx}")
-
-    return df
+    return pd.DataFrame(flat_rows)
 
 
 def run_bayallocation_image_extraction(

@@ -1,9 +1,10 @@
 """
 bayallocation_handler/extraction.py -- PDF table extraction logic
 =================================================================
-Uses Camelot as the primary table extractor for the bay-allocation
-table from each page, with pdfplumber as fallback. Each page is
-treated as one independent extraction unit.
+Uses Camelot as the primary page-wise table extractor for the bay-allocation
+table, then sends the extracted table text to the LLM for row extraction.
+pdfplumber remains only as a fallback. Each page is treated as one independent
+extraction unit.
 
 Camelot produces higher accuracy tables (99%+ with lattice mode)
 compared to pdfplumber's less reliable cell detection.
@@ -662,8 +663,16 @@ def _camelot_to_raw_rows(camelot_tables) -> list[list[str]]:
     return all_rows
 
 
+def _rows_to_table_text(rows: list[list[str]], label: str = "table 1") -> str:
+    """Render already-extracted table rows as compact tab-separated LLM input."""
+    chunks = [f"[{label}]"]
+    for row in rows or []:
+        chunks.append("\t".join(_clean(cell) for cell in (row or [])))
+    return "\n".join(chunks)[:50000]
+
+
 def _page_table_text(page) -> str:
-    """Render pdfplumber table cells as compact tab-separated text for LLM input."""
+    """Render pdfplumber table cells as compact tab-separated text for fallback LLM input."""
     chunks: list[str] = []
     try:
         tables = page.extract_tables() or []
@@ -880,7 +889,9 @@ def extract_bayallocation_image(
 def extract_page_data(page, page_number: int, pdf_path: str = "", runtime=None) -> Optional[dict]:
     """Extract all substations from one page.
 
-    Uses the configured LLM first, then Camelot/pdfplumber as fallback.
+    Extracts table rows with Camelot page-wise first, then sends those table
+    rows to the configured LLM. If the LLM is unavailable or returns no usable
+    rows, falls back to local Camelot/pdfplumber table parsing.
     Each unique substation (identified by sl_no appearing in column 0)
     becomes **exactly one item** in the returned ``substations`` list.
     Each bay number is mapped to its entity name (or empty string) in
@@ -889,28 +900,32 @@ def extract_page_data(page, page_number: int, pdf_path: str = "", runtime=None) 
     Returns None if no allocation table is found on this page.
     """
     page_text = page.extract_text() or ""
-    table_text = _page_table_text(page)
-    llm_result = llm_extract_page_data(
-        page_text,
-        table_text,
-        page_number,
-        runtime,
-        pdf_name=Path(pdf_path).name if pdf_path else "",
-    )
-    if llm_result is not None:
-        return llm_result
 
     target = None
     target_table = None  # pdfplumber table object (for cell-level extraction)
     extraction_method = ""
     use_camelot_rows = False
     camelot_rows: list[list[str]] = []
+    table_text = ""
 
-    # ── Primary: Camelot ──────────────────────────────────────────────────
+    # ── Primary: Camelot table extraction, then LLM row extraction ─────────
     if pdf_path and _HAS_CAMELOT:
         camelot_tables, flavor = _camelot_extract_tables(pdf_path, page_number)
         if camelot_tables:
             raw_rows = _camelot_to_raw_rows(camelot_tables)
+            if raw_rows:
+                table_text = _rows_to_table_text(raw_rows, f"camelot {flavor}")
+                llm_result = llm_extract_page_data(
+                    page_text,
+                    table_text,
+                    page_number,
+                    runtime,
+                    pdf_name=Path(pdf_path).name if pdf_path else "",
+                )
+                if llm_result is not None:
+                    llm_result["extraction_method"] = f"camelot_{flavor}+llm"
+                    return llm_result
+
             if _is_target_table(raw_rows):
                 camelot_rows = raw_rows
                 target = raw_rows
@@ -929,6 +944,17 @@ def extract_page_data(page, page_number: int, pdf_path: str = "", runtime=None) 
                 target_table = tbl
                 target = extracted
                 extraction_method = "pdfplumber_fallback"
+                table_text = _rows_to_table_text(extracted, "pdfplumber fallback")
+                llm_result = llm_extract_page_data(
+                    page_text,
+                    table_text or _page_table_text(page),
+                    page_number,
+                    runtime,
+                    pdf_name=Path(pdf_path).name if pdf_path else "",
+                )
+                if llm_result is not None:
+                    llm_result["extraction_method"] = "pdfplumber_fallback+llm"
+                    return llm_result
                 break
 
     if target is None:
@@ -1098,8 +1124,8 @@ def extract_page_data(page, page_number: int, pdf_path: str = "", runtime=None) 
 def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1, runtime=None) -> list[dict]:
     """Extract all pages from one Bay Allocation PDF.
 
-    Uses the configured LLM page-wise first. If LLM is unavailable or returns
-    no usable rows for a page, falls back to Camelot/pdfplumber table parsing.
+    Uses Camelot page-wise first, sends the extracted table text to the LLM,
+    and falls back to local Camelot/pdfplumber table parsing if needed.
 
     Parameters
     ----------
