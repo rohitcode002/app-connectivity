@@ -29,7 +29,6 @@ from pipeline.cmets_handler.models import PipelineResult, CMETS_COLUMNS
 from pipeline.cmets_handler.extraction import run_single_pdf
 from pipeline.cmets_handler.meeting_classifier import classify_meeting
 from pipeline.cmets_handler.normalization import consolidate_application_duplicates
-from pipeline.cmets_handler.formatter import format_cmets_excel
 from pipeline.token_usage import DEFAULT_TOKEN_USAGE_PATH, get_module_token_usage
 
 logger = logging.getLogger(__name__)
@@ -511,7 +510,5 @@ def run_cmets_extraction(
     print(f"    Token usage   : {DEFAULT_TOKEN_USAGE_PATH}")
     print("=" * 64)
 
-    formatted_path = format_cmets_excel(xlsx)
-    print(f"\n[CMETS] cmets.xlsx → {xlsx.resolve()}")
-    print(f"[CMETS] final formatted → {formatted_path}")
-    return formatted_path
+    print(f"\n[CMETS] 01_cmets_extracted.xlsx → {xlsx.resolve()}")
+    return xlsx

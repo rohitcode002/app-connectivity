@@ -25,19 +25,13 @@ the new column values are added; otherwise they remain blank.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
-from pipeline.mapping_handler.lookup import build_lookup
-from pipeline.mapping_handler.merge import merge_rows
 from pipeline.mapping_handler.formatting import format_mapped_excel
-from pipeline.effectiveness_handler.date_updater import (
-    update_gna_dates,
-    update_additional_capacity_dates,
-)
-from pipeline.effectiveness_handler.capacity_calculator import compute_installed_capacity
 from pipeline.jcc_handler.jcc_output_layer import (
     flatten_jcc_data,
     compute_gna_tgna,
@@ -56,93 +50,287 @@ _START_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helpers for Step 1 — Effectiveness mapping
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _extract_ids(cell_value) -> list[str]:
+    """Extract all numeric IDs (6+ digits) from a cell value."""
+    text = safe_str(cell_value)
+    if not text:
+        return []
+    return re.findall(r"\b\d{6,}\b", text)
+
+
+def _is_valid(val) -> bool:
+    """Check if a value is non-empty and not a placeholder."""
+    if val is None:
+        return False
+    if isinstance(val, float) and pd.isna(val):
+        return False
+    return str(val).strip().lower() not in (
+        "", "none", "null", "na", "n/a", "-", "--", "nan",
+    )
+
+
+def _safe_float(val) -> float:
+    """Convert a value to float, returning 0.0 on failure."""
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return 0.0 if pd.isna(val) else float(val)
+    try:
+        return float(str(val).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return 0.0
+
+
+# Matches patterns like: "Solar(40)", "Wind (12)", "BESS(34)", "Hydro (150)"
+_TYPE_MW_RE = re.compile(
+    r"(solar|wind|bess|ess|hydro|hybrid|psp|pump\s*storage)"
+    r"\s*\(\s*([\d,.]+)\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_type_mw(type_str: str) -> dict[str, float]:
+    """Parse CMETS Type column into keyword → MW mapping.
+
+    Examples:
+        "Solar(40)+BESS(34)"  → {"solar": 40.0, "bess": 34.0}
+        "Wind (300)"          → {"wind": 300.0}
+        "Solar"               → {}  (no MW value)
+    """
+    result: dict[str, float] = {}
+    if not type_str:
+        return result
+    for match in _TYPE_MW_RE.finditer(type_str):
+        keyword = match.group(1).lower().strip()
+        mw = _safe_float(match.group(2))
+        result[keyword] = result.get(keyword, 0.0) + mw
+    return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STEP 1 — CMETS + Effectiveness Mapping
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _step1_effectiveness_mapping(
     cmets_df: pd.DataFrame,
-    effectiveness_output_dir: Path,
+    effectiveness_excel: Path,
     output_excel: Path,
 ) -> tuple[pd.DataFrame, dict]:
-    """Merge CMETS with effectiveness data.
+    """Merge CMETS with effectiveness data (Excel-to-Excel).
 
-    Adds/updates:
-        - Name of Developers, Substation, State, Application Quantum
-          (overwritten from effectiveness when matched)
-        - Region, Type of Project, Installed capacity MW breakdowns
-        - GNA Operationalization Date (updated to later date from effectiveness)
-        - GNA Operationalization (Yes/No) (recomputed)
-        - Date from which additional capacity is to be added (updated)
-        - Installed/Break-up Capacity (MW) columns
+    Logic
+    -----
+    1. Read 02_effectiveness_extracted.xlsx → build application_id lookup.
+    2. For each CMETS row, search GNA/LTA/5.2 IDs in the lookup.
+    3. When matched, update these columns directly:
+         effectiveness.name_of_applicant  → CMETS.Name of Developers
+         effectiveness.substation         → CMETS.Substation
+         effectiveness.state              → CMETS.State
+         effectiveness.expected_date      → CMETS.GNA Operationalization Date
+         effectiveness.installed_capacity_mw → CMETS.Application Quantum (MW)(ST II)
+    4. Then compute Installed/Break-up Capacity (MW) sub-columns:
+         - Parse CMETS Type for MW values (e.g. "Solar(40)+BESS(34)")
+         - Match effectiveness type_of_project keyword → choose target column
+         - Target column = effectiveness MW + CMETS Type parsed MW
 
-    Returns (enriched_df, combined_stats).
+    Output has the EXACT same columns as CMETS — nothing added or removed.
+
+    Returns (enriched_df, stats).
     """
     print("\n" + "=" * 64)
     print("  STEP 1 — CMETS × EFFECTIVENESS MAPPING")
     print("=" * 64)
     print(f"  CMETS rows             : {len(cmets_df)}")
-    print(f"  Effectiveness cache    : {effectiveness_output_dir}")
+    print(f"  Effectiveness Excel    : {effectiveness_excel}")
     print(f"  Output Excel           : {output_excel}")
     print("=" * 64)
 
-    # Build effectiveness lookup from on-disk JSON cache
-    lookup = build_lookup(pd.DataFrame(), effectiveness_output_dir)
-    if not lookup:
-        logger.warning("[Step 1] No effectiveness data — output mirrors CMETS.")
-        print("[Step 1] WARNING: No effectiveness data found.")
-    print(f"[Step 1] Effectiveness lookup: {len(lookup)} unique application IDs")
+    # ── Load effectiveness data from Excel ────────────────────────────────
+    if not effectiveness_excel.exists():
+        logger.warning("[Step 1] Effectiveness Excel not found — output mirrors CMETS.")
+        print("[Step 1] WARNING: Effectiveness Excel not found.")
+        cmets_df.to_excel(str(output_excel), index=False,
+                          sheet_name="CMETS+Effectiveness")
+        return cmets_df, {"matched_gna": 0, "matched_lta": 0,
+                          "matched_52": 0, "unmatched": len(cmets_df),
+                          "total_rows": len(cmets_df)}
 
-    # Merge rows (update overlapping columns + add enrichment columns)
-    enriched_df, merge_stats = merge_rows(cmets_df, lookup)
-    print(
-        f"[Step 1] Merge: "
-        f"GNA={merge_stats['matched_gna']} | "
-        f"LTA={merge_stats['matched_lta']} | "
-        f"5.2={merge_stats['matched_52']} | "
-        f"Unmatched={merge_stats['unmatched']} | "
-        f"Total={merge_stats['total_rows']}"
-    )
+    eff_df = pd.read_excel(effectiveness_excel, sheet_name=0, engine="openpyxl")
+    print(f"[Step 1] Effectiveness rows loaded: {len(eff_df)}")
 
-    # GNA Operationalization Date update
-    if lookup:
-        enriched_df, date_stats = update_gna_dates(enriched_df, lookup)
-        print(
-            f"[Step 1] GNA Date Update: "
-            f"Matched={date_stats['matched']} | "
-            f"Updated={date_stats['updated_date']} | "
-            f"Kept same={date_stats['kept_same']} | "
-            f"No eff date={date_stats['no_eff_date']}"
-        )
+    # Build application_id → row dict lookup
+    eff_lookup: dict[str, dict] = {}
+    for _, eff_row in eff_df.iterrows():
+        app_id = safe_str(eff_row.get("application_id")).strip()
+        if app_id and app_id.lower() not in ("", "none", "nan", "null"):
+            eff_lookup[app_id] = eff_row.to_dict()
 
-    # Additional Capacity Date update
-    if lookup:
-        enriched_df, add_stats = update_additional_capacity_dates(enriched_df, lookup)
-        print(
-            f"[Step 1] Additional Capacity Date: "
-            f"Matched={add_stats['matched']} | "
-            f"Updated={add_stats['updated_date']} | "
-            f"Kept same={add_stats['kept_same']} | "
-            f"No eff date={add_stats['no_eff_date']}"
-        )
+    print(f"[Step 1] Effectiveness lookup: {len(eff_lookup)} unique application IDs")
 
-    # Installed/Break-up Capacity computation
-    if lookup:
-        enriched_df, cap_stats = compute_installed_capacity(enriched_df, lookup)
-        print(
-            f"[Step 1] Installed Capacity: "
-            f"Matched={cap_stats['matched']} | "
-            f"Computed={cap_stats['computed']} | "
-            f"Skipped={cap_stats['skipped']}"
-        )
+    if not eff_lookup:
+        print("[Step 1] WARNING: No effectiveness records with application_id.")
+        cmets_df.to_excel(str(output_excel), index=False,
+                          sheet_name="CMETS+Effectiveness")
+        return cmets_df, {"matched_gna": 0, "matched_lta": 0,
+                          "matched_52": 0, "unmatched": len(cmets_df),
+                          "total_rows": len(cmets_df)}
 
-    # Write intermediate Excel
+    # ── Match and update each CMETS row ───────────────────────────────────
+    matched_gna = matched_lta = matched_52 = unmatched = 0
+    capacity_computed = 0
+
+    for idx, row in cmets_df.iterrows():
+        # Extract all IDs from the 3 CMETS ID columns
+        gna_ids = _extract_ids(row.get("GNA/ST II Application ID"))
+        lta_ids = _extract_ids(row.get("LTA Application ID"))
+        enh_ids = _extract_ids(row.get(
+            "Application ID under Enhancement 5.2 or revision"))
+
+        # Search effectiveness lookup: GNA → LTA → 5.2 cascade
+        eff_rec = None
+        match_via = None
+
+        for aid in gna_ids:
+            if aid in eff_lookup:
+                eff_rec = eff_lookup[aid]
+                match_via = "GNA"
+                break
+
+        if eff_rec is None:
+            for aid in lta_ids:
+                if aid in eff_lookup:
+                    eff_rec = eff_lookup[aid]
+                    match_via = "LTA"
+                    break
+
+        if eff_rec is None:
+            for aid in enh_ids:
+                if aid in eff_lookup:
+                    eff_rec = eff_lookup[aid]
+                    match_via = "5.2"
+                    break
+
+        if eff_rec is None:
+            unmatched += 1
+            continue
+
+        if match_via == "GNA":
+            matched_gna += 1
+        elif match_via == "LTA":
+            matched_lta += 1
+        else:
+            matched_52 += 1
+
+        # ── Direct column updates ─────────────────────────────────────
+        if _is_valid(eff_rec.get("name_of_applicant")):
+            cmets_df.at[idx, "Name of Developers"] = eff_rec["name_of_applicant"]
+        if _is_valid(eff_rec.get("substation")):
+            cmets_df.at[idx, "Substation"] = eff_rec["substation"]
+        if _is_valid(eff_rec.get("state")):
+            cmets_df.at[idx, "State"] = eff_rec["state"]
+        if _is_valid(eff_rec.get("expected_date")):
+            cmets_df.at[idx, "GNA Operationalization Date"] = eff_rec["expected_date"]
+        if _is_valid(eff_rec.get("installed_capacity_mw")):
+            cmets_df.at[idx, "Application Quantum (MW)(ST II)"] = eff_rec["installed_capacity_mw"]
+
+        # ── Installed/Break-up Capacity computation ───────────────────
+        # Parse CMETS Type for MW values: "Solar(40)+BESS(34)" → {"solar": 40, "bess": 34}
+        cmets_type_str = safe_str(row.get("Type"))
+        cmets_type_mw = _parse_type_mw(cmets_type_str)
+
+        # Check effectiveness type_of_project keyword
+        eff_type = safe_str(eff_rec.get("type_of_project")).lower()
+
+        # Effectiveness MW columns
+        eff_mw = {
+            "solar": _safe_float(eff_rec.get("solar_mw")),
+            "wind":  _safe_float(eff_rec.get("wind_mw")),
+            "hydro": _safe_float(eff_rec.get("hydro_mw")),
+            "ess":   _safe_float(eff_rec.get("ess_mw")),
+        }
+
+        # Map: effectiveness type keyword → CMETS capacity column
+        _TYPE_TO_CAPACITY_COL = {
+            "solar":  "Installed/Break-up Capacity (MW) Solar",
+            "wind":   "Installed/Break-up Capacity (MW) Wind",
+            "hybrid": "Installed/Break-up Capacity (MW) Hybrid",
+            "hydro":  "Installed/Break-up Capacity (MW) Hydro",
+        }
+
+        # Map: effectiveness type keyword → which eff_mw key to use
+        _TYPE_TO_EFF_KEY = {
+            "solar": "solar",
+            "wind":  "wind",
+            "hydro": "hydro",
+            "hybrid": None,  # hybrid sums all
+        }
+
+        row_has_capacity = False
+
+        for type_keyword, capacity_col in _TYPE_TO_CAPACITY_COL.items():
+            if type_keyword not in eff_type:
+                continue
+
+            # Get effectiveness MW for this type
+            if type_keyword == "hybrid":
+                # Hybrid = sum of all effectiveness MW
+                eff_val = sum(v for v in eff_mw.values() if v > 0)
+            else:
+                eff_key = _TYPE_TO_EFF_KEY[type_keyword]
+                eff_val = eff_mw.get(eff_key, 0.0)
+
+            # Get CMETS Type parsed MW for matching keyword
+            # Map type keywords to what appears in CMETS Type text
+            _CMETS_TYPE_KEYS = {
+                "solar": ["solar"],
+                "wind":  ["wind"],
+                "hydro": ["hydro", "psp", "pump storage"],
+                "hybrid": ["solar", "wind", "hydro"],
+            }
+            cmets_val = 0.0
+            for tk in _CMETS_TYPE_KEYS.get(type_keyword, []):
+                cmets_val += cmets_type_mw.get(tk, 0.0)
+
+            total = eff_val + cmets_val
+            if total > 0:
+                cmets_df.at[idx, capacity_col] = total
+                row_has_capacity = True
+
+        # Also handle ESS/BESS — ess in effectiveness maps to Battery
+        # ESS is NOT an Installed/Break-up Capacity column but we check
+        # if BESS is in Type and ess_mw > 0, we still need to note it.
+        # (BESS goes to Battery columns which are already extracted)
+
+        if row_has_capacity:
+            capacity_computed += 1
+
+    # ── Write output Excel (same columns as CMETS, no add/remove) ─────
     output_excel.parent.mkdir(parents=True, exist_ok=True)
-    enriched_df.to_excel(str(output_excel), index=False, sheet_name="CMETS+Effectiveness")
-    format_mapped_excel(str(output_excel))
-    print(f"\n[Step 1] ✓ Excel saved → {output_excel}")
+    cmets_df.to_excel(str(output_excel), index=False,
+                      sheet_name="CMETS+Effectiveness")
+    print(
+        f"\n[Step 1] Merge: "
+        f"GNA={matched_gna} | "
+        f"LTA={matched_lta} | "
+        f"5.2={matched_52} | "
+        f"Unmatched={unmatched} | "
+        f"Capacity computed={capacity_computed} | "
+        f"Total={len(cmets_df)}"
+    )
+    print(f"[Step 1] ✓ Excel saved → {output_excel}")
     print("=" * 64)
 
-    return enriched_df, merge_stats
+    stats = {
+        "matched_gna": matched_gna,
+        "matched_lta": matched_lta,
+        "matched_52":  matched_52,
+        "unmatched":   unmatched,
+        "total_rows":  len(cmets_df),
+    }
+    return cmets_df, stats
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -365,12 +553,14 @@ def run_full_mapping_pipeline(
 
     Prerequisites: All 4 individual extractions must have completed:
         - 01_cmets_extracted.xlsx
-        - 02_effectiveness_extracted.xlsx (or effectiveness JSON cache)
+        - 02_effectiveness_extracted.xlsx
         - 04_jcc_extracted.xlsx (or JCC JSON cache)
         - 05_bayallocation_extracted.xlsx (or bay allocation JSON cache)
 
     Pipeline:
         Step 1: CMETS + Effectiveness  → 03_cmets_effectiveness_mapped.xlsx
+                (reads 02_effectiveness_extracted.xlsx directly, updates
+                 columns in-place, computes Installed/Break-up Capacity)
         Step 2: Step1  + JCC           → 06_cmets_jcc_mapped.xlsx
         Step 3: Step2  + Bay Allocation → 07_final_mapped.xlsx
 
@@ -382,7 +572,7 @@ def run_full_mapping_pipeline(
 
     # Input paths
     cmets_excel = excel_root / "01_cmets_extracted.xlsx"
-    effectiveness_cache = output_root / "effectiveness_cache"
+    effectiveness_excel = excel_root / "02_effectiveness_extracted.xlsx"
     jcc_cache = output_root / "jcc_cache"
     bay_cache = output_root / "bayallocation_cache"
 
@@ -395,6 +585,7 @@ def run_full_mapping_pipeline(
     print("  SEQUENTIAL MAPPING PIPELINE")
     print("  ─────────────────────────────────────────────────────────")
     print(f"  Base CMETS Excel      : {cmets_excel}")
+    print(f"  Effectiveness Excel   : {effectiveness_excel}")
     print(f"  Step 1 output         : {step1_excel}")
     print(f"  Step 2 output         : {step2_excel}")
     print(f"  Step 3 output (FINAL) : {step3_excel}")
@@ -416,7 +607,7 @@ def run_full_mapping_pipeline(
     # ── Step 1: CMETS + Effectiveness ─────────────────────────────────────
     step1_df, _ = _step1_effectiveness_mapping(
         cmets_df=cmets_df.copy(),
-        effectiveness_output_dir=effectiveness_cache,
+        effectiveness_excel=effectiveness_excel,
         output_excel=step1_excel,
     )
 
