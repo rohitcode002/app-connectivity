@@ -15,11 +15,8 @@ Phase 2 — Sequential Mappings (each uses CMETS as base):
     2. CMETS × Effectiveness   → excels/03_cmets_effectiveness_mapped.xlsx
     3. CMETS × Bay Allocation  → excels/07_cmets_bayallocation_mapped.xlsx
 
-Phase 3 — Final Combined Output:
-    → excels/final_dtbc.xlsx   (all mapped data combined)
-
-Phase 4 — Formatting:
-    → excels/dtbc_formatted.xlsx  (final formatted output)
+Phase 3 — Final Formatted Output:
+    → excels/dtbc_formatted.xlsx  (final DTBC output)
 """
 
 from __future__ import annotations
@@ -324,16 +321,16 @@ def _map_bayallocation(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 3 — Generate final_dtbc.xlsx
+# Phase 3 — Generate dtbc_formatted.xlsx
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _generate_final_dtbc(final_mapped_excel: Path, excel_root: Path) -> Path:
-    """Generate final_dtbc.xlsx from the fully mapped data."""
+def _generate_dtbc_formatted(final_mapped_excel: Path, excel_root: Path) -> Path:
+    """Generate the final formatted DTBC workbook from the fully mapped data."""
     from pipeline.final_mapping_handler.data_capture import generate_data_to_be_captured
 
-    output_excel = excel_root / "final_dtbc.xlsx"
+    output_excel = excel_root / "dtbc_formatted.xlsx"
 
-    _sub_banner("PHASE 3 — GENERATE final_dtbc.xlsx")
+    _sub_banner("PHASE 3 — GENERATE dtbc_formatted.xlsx")
     print(f"  Source  : {final_mapped_excel}")
     print(f"  Output  : {output_excel}")
 
@@ -341,33 +338,8 @@ def _generate_final_dtbc(final_mapped_excel: Path, excel_root: Path) -> Path:
         final_mapped_excel=final_mapped_excel,
         output_excel=output_excel,
     )
-    print(f"  [✓] final_dtbc.xlsx generated → {result_path}")
+    print(f"  [✓] dtbc_formatted.xlsx generated → {result_path}")
     return Path(result_path)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Phase 4 — Formatting → dtbc_formatted.xlsx
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _apply_dtbc_formatting(source_excel: Path, excel_root: Path) -> Path:
-    """Apply column formatting to final_dtbc.xlsx → dtbc_formatted.xlsx."""
-    from pipeline.mapping_handler.formatting import format_mapped_excel
-    import shutil
-
-    output_excel = excel_root / "dtbc_formatted.xlsx"
-
-    _sub_banner("PHASE 4 — FORMATTING → dtbc_formatted.xlsx")
-    print(f"  Source  : {source_excel}")
-    print(f"  Output  : {output_excel}")
-
-    # Copy final_dtbc.xlsx to dtbc_formatted.xlsx, then apply formatting
-    shutil.copy2(str(source_excel), str(output_excel))
-
-    # Apply the standard professional formatting
-    format_mapped_excel(str(output_excel))
-    print(f"  [✓] Formatting applied → {output_excel.name}")
-
-    return output_excel
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -492,25 +464,14 @@ def main() -> None:
     print(f"{'═' * 64}")
 
     # ══════════════════════════════════════════════════════════════════════
-    # PHASE 3 — GENERATE final_dtbc.xlsx
+    # PHASE 3 — GENERATE dtbc_formatted.xlsx
     # ══════════════════════════════════════════════════════════════════════
     try:
-        dtbc_excel = _generate_final_dtbc(final_mapped_excel, excel_root)
+        formatted_excel = _generate_dtbc_formatted(final_mapped_excel, excel_root)
     except Exception as exc:
-        print(f"  [!] final_dtbc.xlsx generation failed: {exc}")
+        print(f"  [!] dtbc_formatted.xlsx generation failed: {exc}")
         traceback.print_exc()
         _banner("PIPELINE FAILED at Phase 3")
-        return
-
-    # ══════════════════════════════════════════════════════════════════════
-    # PHASE 4 — FORMATTING → dtbc_formatted.xlsx
-    # ══════════════════════════════════════════════════════════════════════
-    try:
-        formatted_excel = _apply_dtbc_formatting(dtbc_excel, excel_root)
-    except Exception as exc:
-        print(f"  [!] Formatting failed: {exc}")
-        traceback.print_exc()
-        _banner("PIPELINE FAILED at Phase 4")
         return
 
     # ══════════════════════════════════════════════════════════════════════
@@ -527,9 +488,7 @@ def main() -> None:
     print(f"      03_cmets_effectiveness_mapped.xlsx")
     print(f"      06_cmets_jcc_mapped.xlsx")
     print(f"      07_cmets_bayallocation_mapped.xlsx")
-    print(f"    Phase 3 — Final Data:")
-    print(f"      final_dtbc.xlsx")
-    print(f"    Phase 4 — Formatted:")
+    print(f"    Phase 3 — Final Formatted:")
     print(f"      dtbc_formatted.xlsx")
     print(f"\n  Final output → {formatted_excel}")
     print(f"{'█' * 64}\n")

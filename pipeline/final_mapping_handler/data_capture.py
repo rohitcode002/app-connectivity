@@ -1,5 +1,5 @@
 """
-final_mapping_handler/data_capture.py — Generate data_to_be_captured.xlsx
+final_mapping_handler/data_capture.py — Generate the final DTBC workbook
 ==========================================================================
 Takes the 07_final_mapped.xlsx (output of the full mapping pipeline) and
 produces a filtered Excel with ONLY the columns the user needs, in the
@@ -24,7 +24,9 @@ See FINAL_COLUMN_MAP below for the full mapping.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -199,6 +201,58 @@ EFF_UPDATED_COLUMNS = [
     "Installed/Break-up Capacity (MW) Hydro",
 ]
 
+ID_NUMBER_TEXT_COLUMNS = [
+    "GNA/ST II Application ID",
+    "LTA Application ID",
+    "Application ID under Enhancement 5.2 or revision",
+]
+
+SCALAR_NUMBER_COLUMNS = [
+    "CMETS GNA Approved",
+    "CMETS LTA Approved",
+    "Application Quantum (MW)(ST II)",
+    "Granted  Quantum GNA/LTA(MW)",
+    "Installed/Break-up Capacity (MW) Solar",
+    "Installed/Break-up Capacity (MW) Wind",
+    "Installed/Break-up Capacity (MW) Hybrid",
+    "Installed/Break-up Capacity (MW) Hydro",
+    "Battery MWh",
+    "Battery Injection (MW)",
+    "Battery Drawl (MW)",
+    "PSP MWh",
+    "PSP Injection (MW)",
+    "PSP Drawl (MW)",
+    "Commissioned TGNA",
+    "Commissioned GNA",
+]
+
+_ROMAN_VALUES = {
+    "i": "I",
+    "ii": "II",
+    "iii": "III",
+    "iv": "IV",
+    "v": "V",
+    "vi": "VI",
+    "vii": "VII",
+    "viii": "VIII",
+    "ix": "IX",
+    "x": "X",
+}
+
+_SUBSTATION_NOISE_RE = re.compile(
+    r"\b("
+    r"schedule|commissioning|implementation|informed|applicant|developer|"
+    r"connectivity|granted|grant|generation|generating|injection|quantum|"
+    r"remarks?|deliberation|agenda|minutes?|application|applied|route|scope"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_STATION_MARKER_RE = re.compile(
+    r"(?:\s*\(?\b(?:PS|SS|GSS|S/S|S\.S\.|S\s*/\s*S)\b\.?\)?)+\s*$",
+    re.IGNORECASE,
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -211,6 +265,225 @@ def _find_source_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
         if col is not None:
             return col
     return None
+
+
+def _is_blank(value: Any) -> bool:
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip().lower() in {"", "none", "nan", "null", "n/a", "-"}
+
+
+def _format_number(value: float) -> int | float:
+    return int(value) if float(value).is_integer() else round(value, 4)
+
+
+def _first_number(value: Any) -> int | float | None:
+    """Return the first numeric value from a messy cell."""
+    if _is_blank(value):
+        return None
+    if isinstance(value, (int, float)):
+        return _format_number(float(value))
+
+    match = re.search(r"\d+(?:,\d{3})*(?:\.\d+)?", str(value))
+    if not match:
+        return None
+    return _format_number(float(match.group(0).replace(",", "")))
+
+
+def _integer_tokens(value: Any, *, min_digits: int = 1) -> list[str]:
+    """Extract integer-like tokens and normalize Excel float strings."""
+    if _is_blank(value):
+        return []
+    if isinstance(value, (int, float)):
+        number = _format_number(float(value))
+        text = str(number)
+        return [text] if len(text) >= min_digits else []
+
+    pattern = r"\d+" if min_digits <= 1 else rf"\b\d{{{min_digits},}}\b"
+    return re.findall(pattern, str(value))
+
+
+def _numbers_only_text(value: Any, *, min_digits: int = 1) -> str | None:
+    numbers = _integer_tokens(value, min_digits=min_digits)
+    return " ".join(numbers) if numbers else None
+
+
+def _numbers_only_value(value: Any, *, min_digits: int = 1) -> int | str | None:
+    numbers = _integer_tokens(value, min_digits=min_digits)
+    if not numbers:
+        return None
+    if len(numbers) == 1:
+        return int(numbers[0])
+    return " ".join(numbers)
+
+
+def _normalise_final_number_columns(output_df: pd.DataFrame) -> pd.DataFrame:
+    """Keep final DTBC numeric fields free of labels, commas, and ordinals."""
+    for col in ID_NUMBER_TEXT_COLUMNS:
+        if col in output_df.columns:
+            output_df[col] = output_df[col].map(
+                lambda value: _numbers_only_text(value, min_digits=6)
+            )
+
+    for col in SCALAR_NUMBER_COLUMNS:
+        if col in output_df.columns:
+            output_df[col] = output_df[col].map(_first_number)
+
+    if "Bay No" in output_df.columns:
+        output_df["Bay No"] = output_df["Bay No"].map(_numbers_only_value)
+
+    return output_df
+
+
+def _normalize_station_roman(text: str) -> str:
+    text = re.sub(
+        r"\b([A-Za-z][A-Za-z .'-]*?)\s+(i{1,3}|iv|v|vi{0,3}|ix|x)-I\b$",
+        lambda match: f"{match.group(1)}-{_ROMAN_VALUES.get(match.group(2).lower(), match.group(2).upper())}",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    def repl(match: re.Match) -> str:
+        prefix, roman = match.groups()
+        return f"{prefix}{_ROMAN_VALUES.get(roman.lower(), roman.upper())}"
+
+    text = re.sub(r"(-\s*)(i{1,3}|iv|v|vi{0,3}|ix|x)\b", repl, text, flags=re.IGNORECASE)
+
+    def spaced_repl(match: re.Match) -> str:
+        name, roman = match.groups()
+        return f"{name}-{_ROMAN_VALUES.get(roman.lower(), roman.upper())}"
+
+    return re.sub(
+        r"\b([A-Za-z][A-Za-z .'-]*?)\s+(i{1,3}|iv|v|vi{0,3}|ix|x)\b$",
+        spaced_repl,
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _strip_station_markers(text: str) -> str:
+    previous = None
+    while previous != text:
+        previous = text
+        text = _STATION_MARKER_RE.sub("", text).strip()
+    return text
+
+
+def _looks_like_station_name(text: str) -> bool:
+    if not text or not re.search(r"[A-Za-z]", text):
+        return False
+    lowered = text.lower().strip()
+    if lowered in {"hvdc", "pg", "pgcil", "sec", "section"}:
+        return False
+    if _SUBSTATION_NOISE_RE.search(text) and not re.search(
+        r"\b(?:bay|bays)\s+at\b|\bpooling\s+station\b", text, re.IGNORECASE
+    ):
+        return False
+    return True
+
+
+def _station_specificity(text: str) -> int:
+    score = 0
+    if re.search(r"-\s*(?:i{1,3}|iv|v|vi{0,3}|ix|x|\d+)\b", text, re.IGNORECASE):
+        score += 4
+    if re.search(r"\b(?:PS|SS|GSS|S/S|S\.S\.|pooling\s+station)\b", text, re.IGNORECASE):
+        score += 2
+    if re.search(r"\b(?:HVDC|PG|PGCIL|BBMB)\b", text, re.IGNORECASE):
+        score += 1
+    return score
+
+
+def _add_default_station_index(text: str) -> str:
+    if re.search(r"-\s*(?:[IVX]+|\d+)\b", text, re.IGNORECASE):
+        return text
+    if re.search(r"[(),;:]|\b(?:PG|PGCIL|BBMB|HVDC)\b", text, re.IGNORECASE):
+        return text
+    if not re.fullmatch(r"[A-Za-z][A-Za-z .'-]*", text):
+        return text
+    return f"{text}-I"
+
+
+def _clean_substation_candidate(text: Any, *, add_default_index: bool = True) -> str | None:
+    if _is_blank(text):
+        return None
+
+    cleaned = str(text).strip()
+    cleaned = re.sub(r"\b\d{2,4}\s*k\s*v\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b\d{2,4}\s*kv\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[\u2010-\u2015]", "-", cleaned)
+    cleaned = re.sub(r"\s*-\s*", "-", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\bBays?\s+at\s+", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\b(?:nearest\s+)?pooling\s+station\s*(?:at|is|:|-)?\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.split(r"\s*/\s*(?!\s*S\b)", cleaned, maxsplit=1)[0]
+    cleaned = re.sub(r"\((?:sec(?:tion)?|ckt|circuit)[^)]*\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = _strip_station_markers(cleaned)
+    cleaned = _normalize_station_roman(cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+([,;)])", r"\1", cleaned)
+    cleaned = re.sub(r"([(,;])\s+", r"\1", cleaned)
+    cleaned = cleaned.strip(" -;,")
+
+    if not _looks_like_station_name(cleaned):
+        return None
+    if add_default_index:
+        cleaned = _add_default_station_index(cleaned)
+    return cleaned or None
+
+
+def _normalise_substation(value: Any) -> str | None:
+    """Normalize final DTBC substation names for matching compatibility."""
+    if _is_blank(value):
+        return None
+
+    raw = str(value).strip()
+    parenthetical_candidates = [
+        candidate
+        for candidate in re.findall(r"\(([^()]*)\)", raw)
+        if _looks_like_station_name(candidate)
+    ]
+    outer = re.sub(r"\([^()]*\)", " ", raw)
+    best_raw = raw
+    best_score = _station_specificity(outer)
+
+    for candidate in parenthetical_candidates:
+        score = _station_specificity(candidate)
+        if score > best_score:
+            best_raw = candidate
+            best_score = score
+
+    tail_match = re.search(
+        r"\b(?:bay|bays)\s+at\s+([A-Za-z][A-Za-z .'-]*(?:-\s*(?:[IVX]+|\d+))?)",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if tail_match and best_raw == raw:
+        best_raw = tail_match.group(1)
+
+    cleaned = _clean_substation_candidate(best_raw)
+    if cleaned:
+        return cleaned
+
+    if best_raw != outer:
+        return _clean_substation_candidate(outer)
+    return None
+
+
+def _normalise_final_text_columns(output_df: pd.DataFrame) -> pd.DataFrame:
+    """Apply final compatibility normalizations to text fields."""
+    if "Substation" in output_df.columns:
+        output_df["Substation"] = output_df["Substation"].map(_normalise_substation)
+    return output_df
 
 
 def _resolve_bay_no(df: pd.DataFrame) -> pd.Series:
@@ -334,7 +607,7 @@ def generate_data_to_be_captured(
     final_mapped_excel: Path,
     output_excel: Path | None = None,
 ) -> Path:
-    """Generate data_to_be_captured.xlsx from the final mapped Excel.
+    """Generate the final DTBC workbook from the final mapped Excel.
 
     Parameters
     ----------
@@ -352,7 +625,7 @@ def generate_data_to_be_captured(
         output_excel = final_mapped_excel.parent / "data_to_be_captured.xlsx"
 
     print("\n" + "█" * 64)
-    print("  STEP 4 — GENERATE data_to_be_captured.xlsx")
+    print(f"  GENERATE FINAL DTBC WORKBOOK — {output_excel.name}")
     print("  ─────────────────────────────────────────────────────────")
     print(f"  Source         : {final_mapped_excel}")
     print(f"  Output         : {output_excel}")
@@ -403,6 +676,8 @@ def generate_data_to_be_captured(
             missing_cols.append(final_name)
 
     output_df = pd.DataFrame(output_data)
+    output_df = _normalise_final_number_columns(output_df)
+    output_df = _normalise_final_text_columns(output_df)
 
     # ── Summary ───────────────────────────────────────────────────────────
     print(f"\n[Step 4] Output columns: {len(output_df.columns)}")
