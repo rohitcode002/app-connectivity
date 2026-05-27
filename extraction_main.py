@@ -30,6 +30,16 @@ import sys
 import traceback
 from pathlib import Path
 
+# ── Neutralise broken xlrd (Python-2-era version) before pandas imports it ──
+# pandas internally does `import_optional_dependency("xlrd")` even when
+# engine="openpyxl" is specified.  If an incompatible xlrd is installed the
+# import itself raises SyntaxError.  We catch that and tell Python to
+# treat xlrd as unavailable so pandas falls back gracefully.
+try:
+    import xlrd  # noqa: F401 — test-import only
+except (SyntaxError, ImportError):
+    sys.modules["xlrd"] = None  # type: ignore[assignment]
+
 import pandas as pd
 
 from config import load_runtime_config
@@ -132,6 +142,11 @@ def _extract_cmets(runtime, excel_root: Path, output_root: Path) -> Path:
     print(f"  Excel  : {excel_path}")
     print(f"  Cache  : {cache_dir}")
 
+    # Skip if output Excel already exists (resume-safe)
+    if excel_path.exists():
+        print(f"  [✓] SKIP — Excel already exists: {excel_path.name}")
+        return excel_path
+
     try:
         result_path = run_cmets_extraction(
             output_dir=str(cache_dir),
@@ -161,6 +176,11 @@ def _extract_jcc(runtime, excel_root: Path, output_root: Path) -> Path:
     print(f"  Excel  : {excel_path}")
     print(f"  Cache  : {cache_dir}")
 
+    # Skip if output Excel already exists (resume-safe)
+    if excel_path.exists():
+        print(f"  [✓] SKIP — Excel already exists: {excel_path.name}")
+        return excel_path
+
     try:
         run_jcc_extraction(
             output_dir=str(cache_dir),
@@ -189,6 +209,11 @@ def _extract_effectiveness(runtime, excel_root: Path, output_root: Path) -> Path
     print(f"  Excel  : {excel_path}")
     print(f"  Cache  : {cache_dir}")
 
+    # Skip if output Excel already exists (resume-safe)
+    if excel_path.exists():
+        print(f"  [✓] SKIP — Excel already exists: {excel_path.name}")
+        return excel_path
+
     try:
         run_effectiveness_extraction(
             output_dir=str(cache_dir),
@@ -216,6 +241,11 @@ def _extract_bayallocation(runtime, excel_root: Path, output_root: Path) -> Path
     _sub_banner("STEP 4 — BAY ALLOCATION EXTRACTION")
     print(f"  Excel  : {excel_path}")
     print(f"  Cache  : {cache_dir}")
+
+    # Skip if output Excel already exists (resume-safe)
+    if excel_path.exists():
+        print(f"  [✓] SKIP — Excel already exists: {excel_path.name}")
+        return excel_path
 
     try:
         run_bayallocation_extraction(
