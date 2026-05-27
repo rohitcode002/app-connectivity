@@ -684,6 +684,43 @@ def _camelot_to_raw_rows(camelot_tables) -> list[list[str]]:
     return all_rows
 
 
+def _clean_multiline(text) -> str:
+    """Match CMETS Camelot cell cleanup for saved page text."""
+    if text is None:
+        return ""
+    return "\n".join(" ".join(line.split()) for line in str(text).splitlines() if line.strip())
+
+
+def _rows_to_markdown(rows: list) -> str:
+    """Render table rows using the same Markdown-table method as CMETS."""
+    if not rows:
+        return "(empty table)"
+
+    cleaned = []
+    for row in rows:
+        cleaned.append([str(cell or "").replace("\n", " ").strip() for cell in row])
+
+    col_count = max(len(row) for row in cleaned)
+    for row in cleaned:
+        while len(row) < col_count:
+            row.append("")
+
+    col_widths = [
+        max(len(row[c]) for row in cleaned)
+        for c in range(col_count)
+    ]
+    col_widths = [max(w, 3) for w in col_widths]
+
+    def fmt_row(row):
+        cells = [row[c].ljust(col_widths[c]) for c in range(col_count)]
+        return "| " + " | ".join(cells) + " |"
+
+    separator = "| " + " | ".join("-" * col_widths[c] for c in range(col_count)) + " |"
+    lines = [fmt_row(cleaned[0]), separator]
+    lines.extend(fmt_row(row) for row in cleaned[1:])
+    return "\n".join(lines)
+
+
 def _rows_to_table_text(rows: list[list[str]], label: str = "table 1") -> str:
     """Render already-extracted table rows as compact tab-separated LLM input."""
     chunks = [f"[{label}]"]
@@ -698,16 +735,26 @@ def _camelot_page_text(
     camelot_tables,
     flavor: str,
 ) -> str:
-    """Render one page's Camelot tables to the saved text format used by LLM."""
-    rows = _camelot_to_raw_rows(camelot_tables)
-    lines = [
-        "=" * 60,
-        f"PDF: {Path(pdf_path).name}",
-        f"PAGE {page_number} — CAMELOT {flavor or 'unknown'}",
-        "=" * 60,
-        _rows_to_table_text(rows, f"camelot {flavor or 'unknown'}"),
-    ]
-    return "\n".join(lines).strip()[:50000]
+    """Render one page's Camelot tables exactly like the CMETS page dump."""
+    lines: list[str] = []
+
+    if not camelot_tables:
+        lines.append(f"{'=' * 60}")
+        lines.append(f"PAGE {page_number} — no tables detected")
+        lines.append(f"{'=' * 60}")
+        return "\n".join(lines)
+
+    for table_idx, table in enumerate(camelot_tables, 1):
+        acc = table.parsing_report.get("accuracy", "n/a")
+        rows = [table.df.columns.tolist()] + table.df.values.tolist()
+        rows = [[_clean_multiline(cell) for cell in row] for row in rows]
+        lines.append(f"{'=' * 60}")
+        lines.append(f"PAGE {page_number} — TABLE {table_idx}  (accuracy: {acc}, flavor: {flavor})")
+        lines.append(f"{'=' * 60}")
+        lines.append(_rows_to_markdown(rows))
+        lines.append("")
+
+    return "\n".join(lines).rstrip()[:50000]
 
 
 def _page_table_text(page) -> str:
@@ -780,17 +827,26 @@ def llm_extract_page_data(
                 purpose="page_allocation_extraction",
                 model=MODEL,
             )
+            last_call = totals.get("last_call", {})
+            call_total = (
+                last_call.get("total_tokens_added", 0)
+                or last_call.get("estimated_total_tokens_added", 0)
+            )
             total_display = totals["total_tokens"] + totals["estimated_total_tokens"]
             rows = _iter_llm_rows(parse_json(content))
             substations, table_rows = _substations_from_llm_rows(rows, page_number)
             if not substations:
-                print(f"      [page {page_number}] Bay LLM returned 0 usable rows (tokens total: {total_display})")
+                print(
+                    f"      [page {page_number}] Bay LLM returned 0 usable rows "
+                    f"(tokens this call: {call_total}, cumulative: {total_display})"
+                )
                 return None
 
             print(
                 f"      [page {page_number}] Bay LLM extracted "
                 f"{sum(len(s.get('allocations', [])) for s in substations)} rows "
-                f"across {len(substations)} substations (tokens total: {total_display})"
+                f"across {len(substations)} substations "
+                f"(tokens this call: {call_total}, cumulative: {total_display})"
             )
             return {
                 "page_number": page_number,
@@ -888,17 +944,26 @@ def extract_bayallocation_image(
                 purpose="page_image_allocation_extraction",
                 model=MODEL,
             )
+            last_call = totals.get("last_call", {})
+            call_total = (
+                last_call.get("total_tokens_added", 0)
+                or last_call.get("estimated_total_tokens_added", 0)
+            )
             total_display = totals["total_tokens"] + totals["estimated_total_tokens"]
             rows = _iter_llm_rows(parse_json(content))
             substations, table_rows = _substations_from_llm_rows(rows, page_number)
             if not substations:
-                print(f"      [page {page_number}] Bay image LLM returned 0 usable rows (tokens total: {total_display})")
+                print(
+                    f"      [page {page_number}] Bay image LLM returned 0 usable rows "
+                    f"(tokens this call: {call_total}, cumulative: {total_display})"
+                )
                 return None
 
             print(
                 f"      [page {page_number}] Bay image LLM extracted "
                 f"{sum(len(s.get('allocations', [])) for s in substations)} rows "
-                f"across {len(substations)} substations (tokens total: {total_display})"
+                f"across {len(substations)} substations "
+                f"(tokens this call: {call_total}, cumulative: {total_display})"
             )
             return {
                 "page_number": page_number,
