@@ -8,24 +8,23 @@ writes excels/cmets.xlsx.
 This is the only file that performs I/O orchestration for Module 1.
 Edit extraction.py or normalization.py to change how data is extracted
 or cleaned — this file only handles discovery, caching, and output.
+
+IMPORTANT: The extraction Excel (01_cmets_extracted.xlsx) produced here
+contains EXACT extracted data with NO formatting.  All formatting is
+applied ONLY in the final dtbc_format Excel (via formatter.py).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Optional
 
 from config import RuntimeConfig, load_runtime_config
-from pipeline.excel_utils import (
-    _apply_data_style,
-    _apply_header_style,
-    _autosize_columns,
-    _get_openpyxl,
-)
 from pipeline.cmets_handler.models import PipelineResult, CMETS_COLUMNS
 from pipeline.cmets_handler.extraction import run_single_pdf
 from pipeline.cmets_handler.meeting_classifier import classify_meeting
@@ -80,7 +79,49 @@ OUTPUT_DIR  : Path = _START_DIR / "output" / "cmets_cache"
 CMETS_EXCEL : Path = _START_DIR / "excels" / "cmets.xlsx"
 
 
+# ─── Region derivation from PDF path ─────────────────────────────────────────
+
+_REGION_PATTERNS = [
+    (r"\bnorth[\s_-]*eastern[\s_-]*region\b", "NER"),
+    (r"\bnorth[\s_-]*east(?:ern)?\b", "NER"),
+    (r"\bnorthern[\s_-]*region\b", "NR"),
+    (r"\bsouthern[\s_-]*region\b", "SR"),
+    (r"\bwestern[\s_-]*region\b", "WR"),
+    (r"\beastern[\s_-]*region\b", "ER"),
+    (r"\bCMETS[\s_-]*NER\b", "NER"),
+    (r"\bCMETS[\s_-]*NR\b", "NR"),
+    (r"\bCMETS[\s_-]*SR\b", "SR"),
+    (r"\bCMETS[\s_-]*WR\b", "WR"),
+    (r"\bCMETS[\s_-]*ER\b", "ER"),
+    (r"\bNER\b", "NER"),
+    (r"\bNR\b", "NR"),
+    (r"\bSR\b", "SR"),
+    (r"\bWR\b", "WR"),
+    (r"\bER\b", "ER"),
+]
+
+
+def _derive_region_from_pdf_path(pdf_path: str) -> str | None:
+    """Derive the region code from the PDF path and filename.
+
+    Checks both the full path (folder names) and the PDF filename
+    for region keywords like 'Northern Region', 'NR', 'SR', etc.
+    """
+    text = str(pdf_path)
+    for pattern, region in _REGION_PATTERNS:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return region
+    return None
+
+
 # ─── Serialisation ────────────────────────────────────────────────────────────
+
+# Meeting-level columns that are injected from meeting_meta (same for all rows per PDF)
+_MEETING_COLS = [
+    "CMETS GNA Approved", "CMETS LTA Approved",
+    "CMETS GNA Meeting Date", "CMETS LTA Meeting Date",
+]
+
 
 def _inject_meeting_meta_into_rows(data: dict, meeting_meta: dict | None) -> dict:
     """Write meeting metadata directly into every row dict in the JSON payload."""
@@ -123,24 +164,24 @@ def _load_json(path: Path) -> dict:
         return json.load(fh)
 
 
-# Meeting-level columns that are injected from meeting_meta (same for all rows per PDF)
-_MEETING_COLS = [
-    "CMETS GNA Approved", "CMETS LTA Approved",
-    "CMETS GNA Meeting Date", "CMETS LTA Meeting Date",
-]
-
-
 def _flatten(all_serialized: list[dict]) -> list[dict]:
-    """Flatten nested per-PDF results into flat rows for Excel."""
+    """Flatten nested per-PDF results into flat rows for Excel.
+
+    This also derives and injects the Region column from the PDF path.
+    """
     records = []
     for pr in all_serialized:
         pdf_path = pr.get("pdf_path", "")
+        # Derive region from PDF path/filename
+        region = _derive_region_from_pdf_path(pdf_path)
         # Meeting-level metadata (same for every row from this PDF)
         meeting = pr.get("meeting_meta") or {}
         for page in pr.get("results", []):
             pnum = page.get("page_number")
             for row in page.get("rows", []):
                 rec = {"PDF": pdf_path, "Page Number": pnum}
+                # Inject region
+                rec["Region"] = region
                 # Inject meeting columns
                 for mcol in _MEETING_COLS:
                     rec[mcol] = meeting.get(mcol) or row.get(mcol)
@@ -172,18 +213,19 @@ def _agg_stats(all_serialized: list[dict]) -> dict:
 
 
 def _ensure_excel_workbook(xlsx: Path) -> Path:
-    """Create the CMETS workbook with headers if it does not already exist."""
+    """Create the CMETS workbook with headers if it does not already exist.
+
+    NO formatting/styling is applied — this is raw extraction output.
+    """
     if xlsx.exists():
         return xlsx.resolve()
 
-    opx = _get_openpyxl()
-    wb = opx.Workbook()
+    from openpyxl import Workbook
+    wb = Workbook()
     ws = wb.active
     ws.title = "Extracted Data"
     ws.append(CMETS_COLUMNS)
     ws.freeze_panes = "A2"
-    _apply_header_style(ws, opx)
-    _autosize_columns(ws)
 
     xlsx.parent.mkdir(parents=True, exist_ok=True)
     wb.save(xlsx)
@@ -218,16 +260,18 @@ def _append_pdf_to_excel(
     runtime_s: float,
     stats: dict,
 ) -> Path:
-    """Append one PDF's flattened JSON rows into the existing CMETS workbook."""
-    opx = _get_openpyxl()
+    """Append one PDF's flattened JSON rows into the existing CMETS workbook.
+
+    NO formatting/styling is applied — this is raw extraction output.
+    """
+    from openpyxl import load_workbook
     if not xlsx.exists():
         _ensure_excel_workbook(xlsx)
 
-    wb = opx.load_workbook(xlsx)
+    wb = load_workbook(xlsx)
     ws = wb["Extracted Data"] if "Extracted Data" in wb.sheetnames else wb.active
     if ws.max_row == 0:
         ws.append(CMETS_COLUMNS)
-        _apply_header_style(ws, opx)
 
     _remove_existing_pdf_rows(ws, data.get("pdf_path", ""))
 
@@ -236,9 +280,6 @@ def _append_pdf_to_excel(
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
-    _apply_header_style(ws, opx)
-    _apply_data_style(ws, opx)
-    _autosize_columns(ws)
 
     if "Run Summary" in wb.sheetnames:
         del wb["Run Summary"]
@@ -255,7 +296,6 @@ def _append_pdf_to_excel(
         ("Total rows",               stats["total_rows"]),
     ]:
         ws_summary.append(list(row))
-    _autosize_columns(ws_summary)
 
     wb.save(xlsx)
     return xlsx
@@ -270,9 +310,12 @@ def _rewrite_extracted_sheet(
     stats: dict,
     duplicates_removed: int,
 ) -> Path:
-    """Rewrite Extracted Data with final CMETS-only consolidated rows."""
-    opx = _get_openpyxl()
-    wb = opx.load_workbook(xlsx) if xlsx.exists() else opx.Workbook()
+    """Rewrite Extracted Data with final CMETS-only consolidated rows.
+
+    NO formatting/styling is applied — this is raw extraction output.
+    """
+    from openpyxl import Workbook, load_workbook
+    wb = load_workbook(xlsx) if xlsx.exists() else Workbook()
 
     if "Extracted Data" in wb.sheetnames:
         ws = wb["Extracted Data"]
@@ -287,9 +330,6 @@ def _rewrite_extracted_sheet(
 
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
-    _apply_header_style(ws, opx)
-    _apply_data_style(ws, opx)
-    _autosize_columns(ws)
 
     if "Run Summary" in wb.sheetnames:
         del wb["Run Summary"]
@@ -307,7 +347,6 @@ def _rewrite_extracted_sheet(
         ("Duplicate rows removed",   duplicates_removed),
     ]:
         ws_summary.append(list(row))
-    _autosize_columns(ws_summary)
 
     xlsx.parent.mkdir(parents=True, exist_ok=True)
     wb.save(xlsx)

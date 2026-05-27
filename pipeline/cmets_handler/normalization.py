@@ -814,8 +814,10 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         # ── Derived: State from Project Location ─────────────────────────
         p["State"] = extract_state(p.get("Project Location"))
 
-        # ── Derived: Type ────────────────────────────────────────────────
-        p["Type"] = norm_type(p.get("Type"))
+        # ── Derived: Type (kept raw — no formatting at extraction) ──────
+        # The raw LLM value (e.g. "Solar (24) +BESS (45)") is preserved.
+        # norm_type formatting is applied only in the final formatter.
+        p["Type"] = clean(p.get("Type"))
 
         # ── Voltage level ────────────────────────────────────────────────
         p["Voltage level"] = norm_voltage(p.get("Voltage level"))

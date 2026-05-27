@@ -22,8 +22,16 @@ class MappedRow(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    # ── Derived columns ──────────────────────────────────────────────────────
+    region:              Optional[str] = Field(None, alias="Region")
+    state:               Optional[str] = Field(None, alias="State")
+
     # ── Extraction columns (from PDF page text via LLM) ──────────────────────
     substation:          Optional[str] = Field(None, alias="Substation")
+
+    # ── Placeholder columns (populated downstream) ───────────────────────────
+    coordinates:         Optional[str] = Field(None, alias="Coordinates")
+
     project_location:    Optional[str] = Field(None, alias="Project Location")
     name_of_developers:  Optional[str] = Field(None, alias="Name of Developers")
     gna_st2_id:          Optional[str] = Field(None, alias="GNA/ST II Application ID")
@@ -31,6 +39,15 @@ class MappedRow(BaseModel):
     enhancement_id:      Optional[str] = Field(None, alias="Application ID under Enhancement 5.2 or revision")
     quantum_mw:          Optional[str] = Field(None, alias="Application Quantum (MW)(ST II)")
     granted_quantum:     Optional[str] = Field(None, alias="Granted Quantum GNA/LTA(MW)")
+
+    # ── Type (kept raw, no formatting at extraction) ─────────────────────────
+    type:                Optional[str] = Field(None, alias="Type")
+
+    # ── Installed/Break-up Capacity (placeholder — populated in formatter) ───
+    capacity_solar:      Optional[str] = Field(None, alias="Installed/Break-up Capacity (MW) Solar")
+    capacity_wind:       Optional[str] = Field(None, alias="Installed/Break-up Capacity (MW) Wind")
+    capacity_hybrid:     Optional[str] = Field(None, alias="Installed/Break-up Capacity (MW) Hybrid")
+    capacity_hydro:      Optional[str] = Field(None, alias="Installed/Break-up Capacity (MW) Hydro")
 
     # ── Battery (BESS) columns ───────────────────────────────────────────────
     battery_mwh:         Optional[str] = Field(None, alias="Battery MWh")
@@ -42,6 +59,10 @@ class MappedRow(BaseModel):
     psp_injection:       Optional[str] = Field(None, alias="PSP Injection (MW)")
     psp_drawl:           Optional[str] = Field(None, alias="PSP Drawl (MW)")
 
+    # ── Commissioned (placeholder — populated from JCC downstream) ───────────
+    commissioned_tgna:   Optional[str] = Field(None, alias="Commissioned TGNA")
+    commissioned_gna:    Optional[str] = Field(None, alias="Commissioned GNA")
+
     submission_date:     Optional[str] = Field(None, alias="Application/Submission Date")
     mode_criteria:       Optional[str] = Field(None, alias="Mode(Criteria for applying)")
     applied_start_date:  Optional[str] = Field(
@@ -49,18 +70,15 @@ class MappedRow(BaseModel):
         alias="Applied Start of Connectivity sought by developer date"
               "( start date of connectivity as per the application)",
     )
+    gna_op_date:         Optional[str] = Field(None, alias="GNA Operationalization Date")
+    gna_op_yesno:        Optional[str] = Field(None, alias="GNA Operationalization (Yes/No)")
     additional_capacity_date: Optional[str] = Field(None, alias="Date from which additional capacity is to be added")
     nature_of_applicant: Optional[str] = Field(None, alias="Nature of Applicant")
     app_status:          Optional[str] = Field(None, alias="Status of application(Withdrawn / granted. Revoked.)")
     voltage_level:       Optional[str] = Field(None, alias="Voltage level")
 
-    # ── Derived columns ──────────────────────────────────────────────────────
-    state:               Optional[str] = Field(None, alias="State")
-    type:                Optional[str] = Field(None, alias="Type")
-
-    # ── Calculated columns ───────────────────────────────────────────────────
-    gna_op_date:         Optional[str] = Field(None, alias="GNA Operationalization Date")
-    gna_op_yesno:        Optional[str] = Field(None, alias="GNA Operationalization (Yes/No)")
+    # ── Bay No (placeholder — populated downstream) ──────────────────────────
+    bay_no:              Optional[str] = Field(None, alias="Bay No")
 
 
 class PageResult(BaseModel):

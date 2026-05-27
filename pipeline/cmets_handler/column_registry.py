@@ -21,6 +21,13 @@ corresponding norm function in normalization.py.
 To add a new column → add an entry here, add a field to MappedRow in models.py,
 update the LLM prompt in prompts.py (if extraction-based), and add a norm
 function in normalization.py (if needed).
+
+COLUMN ORDER
+------------
+The CMETS_COLUMNS list below defines the column order for the raw
+extraction Excel (01_cmets_extracted.xlsx).  The order matches the
+user-specified schema exactly.  No formatting is applied to this
+Excel — it holds exact extracted data.
 """
 
 from __future__ import annotations
@@ -44,48 +51,34 @@ class ColumnDef:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COLUMN DEFINITIONS — ordered as they appear in final output
+# COLUMN DEFINITIONS — ordered as they appear in 01_cmets_extracted.xlsx
 # ═══════════════════════════════════════════════════════════════════════════════
+#
+# The order below exactly matches the user-specified schema for the raw
+# extraction Excel.  Internal bookkeeping columns (PDF, Page Number) are
+# appended at the end so they exist in the data but don't disrupt the
+# user-facing column order.
 
 COLUMN_DEFS: list[ColumnDef] = [
 
-    # ── Internal / bookkeeping ────────────────────────────────────────────────
+    # ── 1. Region (derived from PDF path at flatten time) ────────────────
     ColumnDef(
-        name="PDF",
-        data_source="internal",
-        description="Source PDF file path",
-    ),
-    ColumnDef(
-        name="Page Number",
-        data_source="internal",
-        description="Page number within the PDF",
+        name="Region",
+        data_source="derived",
+        derived_from="PDF path",
+        description="Region code (NR, SR, WR, ER, NER) derived from PDF folder structure",
     ),
 
-    # ── Meeting-level metadata (same for all rows from same PDF) ─────────────
+    # ── 2. State ─────────────────────────────────────────────────────────
     ColumnDef(
-        name="CMETS GNA Approved",
-        data_source="meeting_meta",
-        description="Meeting number if PDF is GNA-classified",
-        norm_func=None,
-    ),
-    ColumnDef(
-        name="CMETS LTA Approved",
-        data_source="meeting_meta",
-        description="Meeting number if PDF is LTA-classified",
-    ),
-    ColumnDef(
-        name="CMETS GNA Meeting Date",
-        data_source="meeting_meta",
-        description="Meeting date (dd.mm.yyyy) if PDF is GNA-classified",
-    ),
-    ColumnDef(
-        name="CMETS LTA Meeting Date",
-        data_source="meeting_meta",
-        description="Meeting date (dd.mm.yyyy) if PDF is LTA-classified",
+        name="State",
+        data_source="derived",
+        derived_from="Project Location",
+        norm_func="extract_state",
+        description="Indian state / UT derived from Project Location text",
     ),
 
-    # ── Extraction columns (from PDF page text via LLM) ──────────────────────
-
+    # ── 3. Substation ────────────────────────────────────────────────────
     ColumnDef(
         name="Substation",
         data_source="extraction",
@@ -102,6 +95,14 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Substation / connectivity location name (e.g. Aligarh (PG), Bhadla-V)",
     ),
 
+    # ── 4. Coordinates (placeholder — populated downstream) ──────────────
+    ColumnDef(
+        name="Coordinates",
+        data_source="internal",
+        description="Substation coordinates — populated in downstream mapping, empty at extraction",
+    ),
+
+    # ── 5. Project Location ──────────────────────────────────────────────
     ColumnDef(
         name="Project Location",
         data_source="extraction",
@@ -111,6 +112,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Project location as stated in the application",
     ),
 
+    # ── 6. Name of Developers ────────────────────────────────────────────
     ColumnDef(
         name="Name of Developers",
         data_source="extraction",
@@ -120,6 +122,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Name of the developer / applicant company",
     ),
 
+    # ── 7. GNA/ST II Application ID ──────────────────────────────────────
     ColumnDef(
         name="GNA/ST II Application ID",
         data_source="extraction",
@@ -135,6 +138,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="GNA or Stage-II application IDs (10-digit, starts with 12/22/11), comma-separated if multiple",
     ),
 
+    # ── 8. LTA Application ID ───────────────────────────────────────────
     ColumnDef(
         name="LTA Application ID",
         data_source="extraction",
@@ -148,6 +152,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="LTA application ID (prefixed with 04/41)",
     ),
 
+    # ── 9. Application ID under Enhancement 5.2 or revision ─────────────
     ColumnDef(
         name="Application ID under Enhancement 5.2 or revision",
         data_source="calculated",
@@ -162,6 +167,46 @@ COLUMN_DEFS: list[ColumnDef] = [
         derived_from="GNA/ST II Application ID, LTA Application ID, Mode(Criteria for applying)",
     ),
 
+    # ── 10. CMETS GNA Approved ───────────────────────────────────────────
+    ColumnDef(
+        name="CMETS GNA Approved",
+        data_source="meeting_meta",
+        description="Meeting number if PDF is GNA-classified",
+        norm_func=None,
+    ),
+
+    # ── 11. CMETS LTA Approved ───────────────────────────────────────────
+    ColumnDef(
+        name="CMETS LTA Approved",
+        data_source="meeting_meta",
+        description="Meeting number if PDF is LTA-classified",
+    ),
+
+    # ── 12. CMETS GNA Meeting Date ───────────────────────────────────────
+    ColumnDef(
+        name="CMETS GNA Meeting Date",
+        data_source="meeting_meta",
+        description="Meeting date (dd.mm.yyyy) if PDF is GNA-classified",
+    ),
+
+    # ── 13. CMETS LTA Meeting Date ───────────────────────────────────────
+    ColumnDef(
+        name="CMETS LTA Meeting Date",
+        data_source="meeting_meta",
+        description="Meeting date (dd.mm.yyyy) if PDF is LTA-classified",
+    ),
+
+    # ── 14. Type (RAW — no formatting applied at extraction) ─────────────
+    ColumnDef(
+        name="Type",
+        data_source="derived",
+        llm_key="type",
+        derived_from="type",
+        norm_func=None,      # Deliberately None — keep raw LLM value
+        description="Energy source type — kept as raw extracted text (e.g. 'Solar (24) +BESS (45)')",
+    ),
+
+    # ── 15. Application Quantum (MW)(ST II) ──────────────────────────────
     ColumnDef(
         name="Application Quantum (MW)(ST II)",
         data_source="extraction",
@@ -176,6 +221,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Applied connectivity quantum in MW",
     ),
 
+    # ── 16. Granted Quantum GNA/LTA(MW) ──────────────────────────────────
     ColumnDef(
         name="Granted Quantum GNA/LTA(MW)",
         data_source="calculated",
@@ -184,9 +230,29 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Calculated: equals Application Quantum (MW) when status is 'granted', otherwise null",
     ),
 
-    # ── Battery (BESS) columns ───────────────────────────────────────────────
-    # Battery data appears in tables with BESS mention.
-    # Generally drawl is larger than injection for BESS.
+    # ── 17–20. Installed/Break-up Capacity (MW) sub-columns ──────────────
+    ColumnDef(
+        name="Installed/Break-up Capacity (MW) Solar",
+        data_source="internal",
+        description="Solar installed capacity — populated in formatter, empty at extraction",
+    ),
+    ColumnDef(
+        name="Installed/Break-up Capacity (MW) Wind",
+        data_source="internal",
+        description="Wind installed capacity — populated in formatter, empty at extraction",
+    ),
+    ColumnDef(
+        name="Installed/Break-up Capacity (MW) Hybrid",
+        data_source="internal",
+        description="Hybrid installed capacity — populated in formatter, empty at extraction",
+    ),
+    ColumnDef(
+        name="Installed/Break-up Capacity (MW) Hydro",
+        data_source="internal",
+        description="Hydro installed capacity — populated in formatter, empty at extraction",
+    ),
+
+    # ── 21–23. Battery (BESS) columns ────────────────────────────────────
     ColumnDef(
         name="Battery MWh",
         data_source="extraction",
@@ -226,7 +292,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Battery drawl capacity in MW. With BESS, generally larger than injection.",
     ),
 
-    # ── PSP (Pump Storage) columns ───────────────────────────────────────────
+    # ── 24–26. PSP (Pump Storage) columns ────────────────────────────────
     ColumnDef(
         name="PSP MWh",
         data_source="extraction",
@@ -252,6 +318,19 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Pump storage drawl capacity in MW",
     ),
 
+    # ── 27–28. Commissioned [TGNA, GNA] (placeholder — from JCC) ────────
+    ColumnDef(
+        name="Commissioned TGNA",
+        data_source="internal",
+        description="TGNA value — populated from JCC mapping downstream, empty at extraction",
+    ),
+    ColumnDef(
+        name="Commissioned GNA",
+        data_source="internal",
+        description="GNA value — populated from JCC mapping downstream, empty at extraction",
+    ),
+
+    # ── 29. Application/Submission Date ──────────────────────────────────
     ColumnDef(
         name="Application/Submission Date",
         data_source="extraction",
@@ -266,6 +345,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Application or submission date",
     ),
 
+    # ── 30. Mode(Criteria for applying) ──────────────────────────────────
     ColumnDef(
         name="Mode(Criteria for applying)",
         data_source="extraction",
@@ -280,6 +360,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Mode or criteria for applying, normalised to LOA or PPA / Land BG",
     ),
 
+    # ── 31. Applied Start of Connectivity ────────────────────────────────
     ColumnDef(
         name="Applied Start of Connectivity sought by developer date"
              "( start date of connectivity as per the application)",
@@ -294,6 +375,26 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Start date of connectivity as per the application",
     ),
 
+    # ── 32. GNA Operationalization Date ──────────────────────────────────
+    ColumnDef(
+        name="GNA Operationalization Date",
+        data_source="extraction",
+        llm_key="GNA Operationalization Date",
+        aliases=["GNA Operationalization Date", "SCoD", "SCOD"],
+        norm_func="extract_date",
+        description="GNA operationalization date (near SCoD/SCOD in text)",
+    ),
+
+    # ── 33. GNA Operationalization (Yes/No) ──────────────────────────────
+    ColumnDef(
+        name="GNA Operationalization (Yes/No)",
+        data_source="calculated",
+        derived_from="GNA Operationalization Date",
+        norm_func="gna_yes_no",
+        description="Yes if GNA Operationalization Date is today/past, No if it is future",
+    ),
+
+    # ── 34. Date from which additional capacity is to be added ───────────
     ColumnDef(
         name="Date from which additional capacity is to be added",
         data_source="extraction",
@@ -306,6 +407,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Date from which additional capacity is to be added",
     ),
 
+    # ── 35. Nature of Applicant ──────────────────────────────────────────
     ColumnDef(
         name="Nature of Applicant",
         data_source="extraction",
@@ -315,6 +417,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Nature of applicant (Generator, Bulk consumer, etc.)",
     ),
 
+    # ── 36. Status of application ────────────────────────────────────────
     ColumnDef(
         name="Status of application(Withdrawn / granted. Revoked.)",
         data_source="extraction",
@@ -328,6 +431,7 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Application status: Withdrawn, Granted, Applied",
     ),
 
+    # ── 37. Voltage level ────────────────────────────────────────────────
     ColumnDef(
         name="Voltage level",
         data_source="extraction",
@@ -337,41 +441,23 @@ COLUMN_DEFS: list[ColumnDef] = [
         description="Voltage level of the substation/connectivity point (e.g. 400 kV, 220 kV)",
     ),
 
-    # ── Derived columns (computed from other extracted columns) ───────────────
-
+    # ── 38. Bay No (placeholder — populated downstream) ──────────────────
     ColumnDef(
-        name="State",
-        data_source="derived",
-        derived_from="Project Location",
-        norm_func="extract_state",
-        description="Indian state / UT derived from Project Location text",
+        name="Bay No",
+        data_source="internal",
+        description="Bay number — populated in downstream mapping, empty at extraction",
     ),
 
+    # ── Internal bookkeeping columns (at the end) ────────────────────────
     ColumnDef(
-        name="Type",
-        data_source="derived",
-        llm_key="type",
-        derived_from="type",
-        norm_func="norm_type",
-        description="Energy source type (Solar, Wind, Hybrid, BESS, Solar + BESS, etc.)",
-    ),
-
-    # ── Calculated columns (from extraction + logic) ─────────────────────────
-
-    ColumnDef(
-        name="GNA Operationalization Date",
-        data_source="extraction",
-        llm_key="GNA Operationalization Date",
-        aliases=["GNA Operationalization Date", "SCoD", "SCOD"],
-        norm_func="extract_date",
-        description="GNA operationalization date (near SCoD/SCOD in text)",
+        name="PDF",
+        data_source="internal",
+        description="Source PDF file path",
     ),
     ColumnDef(
-        name="GNA Operationalization (Yes/No)",
-        data_source="calculated",
-        derived_from="GNA Operationalization Date",
-        norm_func="gna_yes_no",
-        description="Yes if GNA Operationalization Date is today/past, No if it is future",
+        name="Page Number",
+        data_source="internal",
+        description="Page number within the PDF",
     ),
 ]
 

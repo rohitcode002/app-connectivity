@@ -38,6 +38,7 @@ FINAL_FORMATTED_COLUMNS = [
     "State",
     "Substation",
     "Coordinates",
+    "Project Location",
     "Name of Developers",
     "GNA/ST II Application ID",
     "LTA Application ID",
@@ -48,6 +49,7 @@ FINAL_FORMATTED_COLUMNS = [
     "CMETS LTA Meeting Date",
     "Type",
     "Application Quantum (MW)(ST II)",
+    "Granted Quantum GNA/LTA(MW)",
     "Installed/Break-up Capacity (MW) Solar",
     "Installed/Break-up Capacity (MW) Wind",
     "Installed/Break-up Capacity (MW) Hybrid",
@@ -301,6 +303,14 @@ def format_cmets_excel(source_path: str | Path, output_path: str | Path | None =
             "Status of application(Withdrawn / granted. Revoked.)",
             _format_status(_get(ws, row_idx, headers, "Status of application(Withdrawn / granted. Revoked.)")),
         )
+
+        # ── Granted Quantum: copy Application Quantum when status is granted ─
+        status_val = _text(_get(ws, row_idx, headers, "Status of application(Withdrawn / granted. Revoked.)")).lower()
+        if status_val == "granted":
+            _set(ws, row_idx, headers, "Granted Quantum GNA/LTA(MW)",
+                 _format_numeric_cell(_get(ws, row_idx, headers, "Application Quantum (MW)(ST II)")))
+        else:
+            _set(ws, row_idx, headers, "Granted Quantum GNA/LTA(MW)", None)
 
         formatted_type, capacities = _parse_type(_get(ws, row_idx, headers, "Type"))
         _set(ws, row_idx, headers, "Type", formatted_type)
