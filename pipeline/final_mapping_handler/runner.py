@@ -32,14 +32,6 @@ from typing import Optional
 import pandas as pd
 
 from pipeline.mapping_handler.formatting import format_mapped_excel
-from pipeline.jcc_handler.jcc_output_layer import (
-    flatten_jcc_data,
-    compute_gna_tgna,
-    _collect_cmets_id_columns,
-    _candidate_ids_from_cmets_row,
-    _find_jcc_by_any_cmets_id,
-    extract_bay_no_from_jcc_ists_scope,
-)
 from pipeline.bay_mapping_handler.lookup import build_bay_lookup
 from pipeline.bay_mapping_handler.merge import merge_bay_allocation
 from pipeline.shared_utils import safe_str
@@ -334,150 +326,127 @@ def _step1_effectiveness_mapping(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 2 — + JCC Mapping (TGNA / GNA)
+# STEP 2 — + JCC Mapping (Commissioned TGNA / GNA)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _load_jcc_results(jcc_cache_dir: Path) -> list[dict]:
-    """Load all JCC extraction results from JSON cache."""
-    import json
-    results: list[dict] = []
-    if not jcc_cache_dir.exists():
-        return results
-    for jf in sorted(jcc_cache_dir.glob("*.json")):
-        try:
-            with open(jf, "r", encoding="utf-8") as fh:
-                results.append(json.load(fh))
-        except Exception:
-            continue
-    return results
-
 
 def _step2_jcc_mapping(
     df: pd.DataFrame,
-    jcc_cache_dir: Path,
+    jcc_excel: Path,
     output_excel: Path,
 ) -> pd.DataFrame:
-    """Map CMETS (enriched with effectiveness) to JCC data.
+    """Map CMETS (enriched with effectiveness) to JCC data (Excel-to-Excel).
 
-    For each CMETS row, pick GNA/LTA/5.2 IDs and search in JCC
-    connectivity_applicant. If matched, compute TGNA and GNA from
-    the matched JCC row and add them as new columns.
+    Logic
+    -----
+    1. Read 04_jcc_extracted.xlsx → build gna_lta_id lookup.
+    2. For each CMETS row, search GNA/LTA/5.2 IDs in the JCC gna_lta_id column.
+    3. When matched, pick TGNA and GNA values from the JCC row.
+    4. Update Commissioned TGNA and Commissioned GNA columns in CMETS.
 
-    Adds: TGNA, GNA, Match Source, Matched JCC ID, Bay No (JCC)
+    Output has the EXACT same columns as input — nothing added or removed.
+    Same column order preserved.
     """
     print("\n" + "=" * 64)
-    print("  STEP 2 — CMETS × JCC MAPPING (TGNA / GNA)")
+    print("  STEP 2 — CMETS × JCC MAPPING (Commissioned TGNA / GNA)")
     print("=" * 64)
     print(f"  Input rows      : {len(df)}")
-    print(f"  JCC cache dir   : {jcc_cache_dir}")
+    print(f"  JCC Excel       : {jcc_excel}")
     print(f"  Output Excel    : {output_excel}")
     print("=" * 64)
 
-    # Load JCC results from cache
-    jcc_results = _load_jcc_results(jcc_cache_dir)
-    jcc_rows = flatten_jcc_data(jcc_results)
-    print(f"[Step 2] JCC cache files loaded: {len(jcc_results)}")
-    print(f"[Step 2] JCC rows available: {len(jcc_rows)}")
-
-    if not jcc_rows:
-        print("[Step 2] ⚠ No JCC rows — TGNA/GNA columns will be empty.")
-        df["TGNA"] = None
-        df["GNA"] = None
-        df["Match Source"] = None
-        df["Matched JCC ID"] = None
-        df["Bay No (JCC)"] = None
-        df.to_excel(str(output_excel), index=False, sheet_name="CMETS+Effectiveness+JCC")
-        format_mapped_excel(str(output_excel))
-        print(f"\n[Step 2] ✓ Excel saved → {output_excel}")
-        print("=" * 64)
+    # ── Load JCC data from Excel ──────────────────────────────────────────
+    if not jcc_excel.exists():
+        logger.warning("[Step 2] JCC Excel not found — Commissioned columns stay empty.")
+        print("[Step 2] WARNING: JCC Excel not found.")
+        df.to_excel(str(output_excel), index=False,
+                    sheet_name="CMETS+Effectiveness+JCC")
         return df
 
-    # Identify ID columns in CMETS
-    id_columns = _collect_cmets_id_columns(df)
-    print("[Step 2] CMETS ID cols:")
-    for source, col in id_columns:
-        print(f"    {source:<3} → {col}")
-    print("-" * 64)
+    jcc_df = pd.read_excel(jcc_excel, sheet_name=0, engine="openpyxl")
+    print(f"[Step 2] JCC rows loaded: {len(jcc_df)}")
 
-    # Match each CMETS row → JCC
-    tgna_values: list = []
-    gna_values: list = []
-    match_sources: list[str] = []
-    matched_ids: list[str] = []
-    jcc_bay_values: list[str] = []
+    # Build gna_lta_id → row dict lookup
+    # A single gna_lta_id cell can contain multiple IDs (comma/semicolon separated)
+    jcc_lookup: dict[str, dict] = {}
+    for _, jcc_row in jcc_df.iterrows():
+        gna_lta_raw = safe_str(jcc_row.get("gna_lta_id"))
+        if not gna_lta_raw:
+            continue
+        row_dict = jcc_row.to_dict()
+        # Split gna_lta_id into individual IDs and map each to this row
+        for aid in re.findall(r"\b\d{6,}\b", gna_lta_raw):
+            if aid not in jcc_lookup:
+                jcc_lookup[aid] = row_dict
 
+    print(f"[Step 2] JCC lookup: {len(jcc_lookup)} unique application IDs")
+
+    if not jcc_lookup:
+        print("[Step 2] WARNING: No JCC records with gna_lta_id.")
+        df.to_excel(str(output_excel), index=False,
+                    sheet_name="CMETS+Effectiveness+JCC")
+        return df
+
+    # ── Match and update each CMETS row ───────────────────────────────────
     matched_count = 0
-    gna_count = 0
     tgna_count = 0
-    jcc_bay_count = 0
-    match_by = {"Application ID": 0, "GNA": 0, "LTA": 0, "5.2": 0}
+    gna_count = 0
 
     for idx, row in df.iterrows():
-        id_candidates = _candidate_ids_from_cmets_row(row, id_columns)
+        # Extract all IDs from the 3 CMETS ID columns
+        gna_ids = _extract_ids(row.get("GNA/ST II Application ID"))
+        lta_ids = _extract_ids(row.get("LTA Application ID"))
+        enh_ids = _extract_ids(row.get(
+            "Application ID under Enhancement 5.2 or revision"))
 
-        if not id_candidates:
-            tgna_values.append(None)
-            gna_values.append(None)
-            match_sources.append("")
-            matched_ids.append("")
-            jcc_bay_values.append("")
-            continue
+        # Search JCC lookup: GNA → LTA → 5.2 cascade
+        jcc_rec = None
 
-        jcc_match, source, matched_id = _find_jcc_by_any_cmets_id(id_candidates, jcc_rows)
+        for aid in gna_ids:
+            if aid in jcc_lookup:
+                jcc_rec = jcc_lookup[aid]
+                break
 
-        if jcc_match is None:
-            tgna_values.append(None)
-            gna_values.append(None)
-            match_sources.append("")
-            matched_ids.append("")
-            jcc_bay_values.append("")
+        if jcc_rec is None:
+            for aid in lta_ids:
+                if aid in jcc_lookup:
+                    jcc_rec = jcc_lookup[aid]
+                    break
+
+        if jcc_rec is None:
+            for aid in enh_ids:
+                if aid in jcc_lookup:
+                    jcc_rec = jcc_lookup[aid]
+                    break
+
+        if jcc_rec is None:
             continue
 
         matched_count += 1
-        match_by[source] = match_by.get(source, 0) + 1
 
-        gna_val, tgna_val = compute_gna_tgna(jcc_match)
+        # ── Pick TGNA and GNA from JCC row ────────────────────────────
+        tgna_val = jcc_rec.get("TGNA")
+        gna_val = jcc_rec.get("GNA")
 
-        if gna_val is not None:
-            gna_count += 1
-        if tgna_val is not None:
+        if _is_valid(tgna_val):
+            df.at[idx, "Commissioned TGNA"] = tgna_val
             tgna_count += 1
+        if _is_valid(gna_val):
+            df.at[idx, "Commissioned GNA"] = gna_val
+            gna_count += 1
 
-        tgna_values.append(tgna_val)
-        gna_values.append(gna_val)
-        match_sources.append(source)
-        matched_ids.append(matched_id)
-
-        jcc_bay_no = extract_bay_no_from_jcc_ists_scope(jcc_match)
-        if jcc_bay_no:
-            jcc_bay_count += 1
-        jcc_bay_values.append(jcc_bay_no)
-
-    # Append columns
-    df["TGNA"] = tgna_values
-    df["GNA"] = gna_values
-    df["Match Source"] = match_sources
-    df["Matched JCC ID"] = matched_ids
-    df["Bay No (JCC)"] = jcc_bay_values
-
-    # Print summary
-    print(f"\n[Step 2] Results:")
-    print(f"    Total rows              : {len(df)}")
-    print(f"    Matched to JCC          : {matched_count}")
-    print(f"      via Application ID    : {match_by.get('Application ID', 0)}")
-    print(f"      via GNA ID            : {match_by.get('GNA', 0)}")
-    print(f"      via LTA ID            : {match_by.get('LTA', 0)}")
-    print(f"      via 5.2 Enhancement   : {match_by.get('5.2', 0)}")
-    print(f"    GNA values populated    : {gna_count}")
-    print(f"    TGNA values populated   : {tgna_count}")
-    print(f"    JCC bay numbers found   : {jcc_bay_count}")
-    print(f"    Unmatched               : {len(df) - matched_count}")
-
-    # Write intermediate Excel
+    # ── Write output Excel (same columns, same order) ─────────────────
     output_excel.parent.mkdir(parents=True, exist_ok=True)
-    df.to_excel(str(output_excel), index=False, sheet_name="CMETS+Effectiveness+JCC")
-    format_mapped_excel(str(output_excel))
-    print(f"\n[Step 2] ✓ Excel saved → {output_excel}")
+    df.to_excel(str(output_excel), index=False,
+                sheet_name="CMETS+Effectiveness+JCC")
+    print(
+        f"\n[Step 2] Results: "
+        f"Matched={matched_count} | "
+        f"TGNA populated={tgna_count} | "
+        f"GNA populated={gna_count} | "
+        f"Unmatched={len(df) - matched_count} | "
+        f"Total={len(df)}"
+    )
+    print(f"[Step 2] ✓ Excel saved → {output_excel}")
     print("=" * 64)
 
     return df
@@ -554,15 +523,17 @@ def run_full_mapping_pipeline(
     Prerequisites: All 4 individual extractions must have completed:
         - 01_cmets_extracted.xlsx
         - 02_effectiveness_extracted.xlsx
-        - 04_jcc_extracted.xlsx (or JCC JSON cache)
+        - 04_jcc_extracted.xlsx
         - 05_bayallocation_extracted.xlsx (or bay allocation JSON cache)
 
     Pipeline:
         Step 1: CMETS + Effectiveness  → 03_cmets_effectiveness_mapped.xlsx
-                (reads 02_effectiveness_extracted.xlsx directly, updates
-                 columns in-place, computes Installed/Break-up Capacity)
-        Step 2: Step1  + JCC           → 06_cmets_jcc_mapped.xlsx
-        Step 3: Step2  + Bay Allocation → 07_final_mapped.xlsx
+                (reads 02_effectiveness_extracted.xlsx, updates columns
+                 in-place, computes Installed/Break-up Capacity)
+        Step 2: Step1 + JCC            → 06_cmets_jcc_mapped.xlsx
+                (reads 04_jcc_extracted.xlsx, updates Commissioned
+                 TGNA/GNA via gna_lta_id matching)
+        Step 3: Step2 + Bay Allocation → 07_final_mapped.xlsx
 
     Returns the path to the final output Excel.
     """
@@ -573,7 +544,7 @@ def run_full_mapping_pipeline(
     # Input paths
     cmets_excel = excel_root / "01_cmets_extracted.xlsx"
     effectiveness_excel = excel_root / "02_effectiveness_extracted.xlsx"
-    jcc_cache = output_root / "jcc_cache"
+    jcc_excel = excel_root / "04_jcc_extracted.xlsx"
     bay_cache = output_root / "bayallocation_cache"
 
     # Output paths
@@ -586,6 +557,7 @@ def run_full_mapping_pipeline(
     print("  ─────────────────────────────────────────────────────────")
     print(f"  Base CMETS Excel      : {cmets_excel}")
     print(f"  Effectiveness Excel   : {effectiveness_excel}")
+    print(f"  JCC Excel             : {jcc_excel}")
     print(f"  Step 1 output         : {step1_excel}")
     print(f"  Step 2 output         : {step2_excel}")
     print(f"  Step 3 output (FINAL) : {step3_excel}")
@@ -614,7 +586,7 @@ def run_full_mapping_pipeline(
     # ── Step 2: Step1 + JCC ───────────────────────────────────────────────
     step2_df = _step2_jcc_mapping(
         df=step1_df.copy(),
-        jcc_cache_dir=jcc_cache,
+        jcc_excel=jcc_excel,
         output_excel=step2_excel,
     )
 
