@@ -272,13 +272,13 @@ def _map_jcc(cmets_df: pd.DataFrame, output_root: Path, excel_root: Path) -> tup
     """Map CMETS × JCC → 06_cmets_jcc_mapped.xlsx"""
     from pipeline.final_mapping_handler.runner import _step2_jcc_mapping
 
+    jcc_excel = excel_root / "04_jcc_extracted.xlsx"
     output_excel = excel_root / "06_cmets_jcc_mapped.xlsx"
-    jcc_cache = output_root / "jcc_cache"
 
     _sub_banner("MAPPING 1 — CMETS × JCC")
     mapped_df = _step2_jcc_mapping(
         df=cmets_df.copy(),
-        jcc_cache_dir=jcc_cache,
+        jcc_excel=jcc_excel,
         output_excel=output_excel,
     )
     print(f"  [✓] JCC mapping complete → {output_excel.name}")
@@ -291,13 +291,13 @@ def _map_effectiveness(
     """Map CMETS × Effectiveness → 03_cmets_effectiveness_mapped.xlsx"""
     from pipeline.final_mapping_handler.runner import _step1_effectiveness_mapping
 
+    effectiveness_excel = excel_root / "02_effectiveness_extracted.xlsx"
     output_excel = excel_root / "03_cmets_effectiveness_mapped.xlsx"
-    eff_cache = output_root / "effectiveness_cache"
 
     _sub_banner("MAPPING 2 — CMETS × EFFECTIVENESS")
     mapped_df, _ = _step1_effectiveness_mapping(
         cmets_df=cmets_df.copy(),
-        effectiveness_output_dir=eff_cache,
+        effectiveness_excel=effectiveness_excel,
         output_excel=output_excel,
     )
     print(f"  [✓] Effectiveness mapping complete → {output_excel.name}")
@@ -310,13 +310,13 @@ def _map_bayallocation(
     """Map (enriched CMETS) × Bay Allocation → 07_cmets_bayallocation_mapped.xlsx"""
     from pipeline.final_mapping_handler.runner import _step3_bay_mapping
 
+    bay_excel = excel_root / "05_bayallocation_extracted.xlsx"
     output_excel = excel_root / "07_cmets_bayallocation_mapped.xlsx"
-    bay_cache = output_root / "bayallocation_cache"
 
     _sub_banner("MAPPING 3 — CMETS × BAY ALLOCATION")
     mapped_df = _step3_bay_mapping(
         df=df.copy(),
-        bay_cache_dir=bay_cache,
+        bay_excel=bay_excel,
         output_excel=output_excel,
     )
     print(f"  [✓] Bay Allocation mapping complete → {output_excel.name}")

@@ -75,6 +75,13 @@ def _safe_float(val) -> float:
         return 0.0
 
 
+def _make_columns_assignable(df: pd.DataFrame, columns: list[str]) -> None:
+    """Allow mixed Excel values to be assigned into pandas string columns."""
+    for col in columns:
+        if col in df.columns:
+            df[col] = df[col].astype("object")
+
+
 # Matches patterns like: "Solar(40)", "Wind (12)", "BESS(34)", "Hydro (150)"
 _TYPE_MW_RE = re.compile(
     r"(solar|wind|bess|ess|hydro|hybrid|psp|pump\s*storage)"
@@ -172,6 +179,17 @@ def _step1_effectiveness_mapping(
     # ── Match and update each CMETS row ───────────────────────────────────
     matched_gna = matched_lta = matched_52 = unmatched = 0
     capacity_computed = 0
+    _make_columns_assignable(cmets_df, [
+        "Name of Developers",
+        "Substation",
+        "State",
+        "GNA Operationalization Date",
+        "Application Quantum (MW)(ST II)",
+        "Installed/Break-up Capacity (MW) Solar",
+        "Installed/Break-up Capacity (MW) Wind",
+        "Installed/Break-up Capacity (MW) Hybrid",
+        "Installed/Break-up Capacity (MW) Hydro",
+    ])
 
     for idx, row in cmets_df.iterrows():
         # Extract all IDs from the 3 CMETS ID columns
@@ -389,6 +407,7 @@ def _step2_jcc_mapping(
     matched_count = 0
     tgna_count = 0
     gna_count = 0
+    _make_columns_assignable(df, ["Commissioned TGNA", "Commissioned GNA"])
 
     for idx, row in df.iterrows():
         # Extract all IDs from the 3 CMETS ID columns

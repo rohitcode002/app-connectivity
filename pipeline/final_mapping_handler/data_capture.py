@@ -57,7 +57,8 @@ FINAL_COLUMN_MAP: list[tuple[str, list[str]]] = [
      ["Substation"]),
 
     ("Coordinates",
-     ["Substation Coordinates (Bay Allocation)"]),
+     ["Substation Coordinates (Bay Allocation)",
+      "Coordinates"]),
 
     ("Name of Developers",
      ["Name of Developers", "Name of the developers"]),
@@ -131,10 +132,10 @@ FINAL_COLUMN_MAP: list[tuple[str, list[str]]] = [
 
     # Commissioned — maps to TGNA and GNA from JCC
     ("Commissioned TGNA",
-     ["TGNA"]),
+     ["Commissioned TGNA", "TGNA"]),
 
     ("Commissioned GNA",
-     ["GNA"]),
+     ["Commissioned GNA", "GNA"]),
 
     ("Application/Submission Date",
      ["Application/Submission Date"]),
@@ -220,7 +221,7 @@ def _resolve_bay_no(df: pd.DataFrame) -> pd.Series:
         2. Bay No (Bay Allocation) — matched from Bay Allocation PDF
     """
     jcc_col = find_col(df, "Bay No (JCC)")
-    bay_col = find_col(df, "Bay No (Bay Allocation)")
+    bay_col = find_col(df, "Bay No (Bay Allocation)") or find_col(df, "Bay No")
 
     result = pd.Series([None] * len(df), index=df.index)
 
