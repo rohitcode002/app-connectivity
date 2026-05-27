@@ -45,29 +45,17 @@ def _default_source_dir() -> Path:
 
 BAY_SOURCE_DIR : Path = _default_source_dir()
 BAY_OUTPUT_DIR : Path = _START_DIR / "output" / "bayallocation_cache"
-BAY_EXCEL      : Path = _START_DIR / "excels" / "bayallocation_extracted.xlsx"
+BAY_EXCEL      : Path = _START_DIR / "excels" / "05_bayallocation_extracted.xlsx"
 
 # Flat columns exported to Excel (in order)
 EXCEL_COLUMNS = [
-    "source_pdf",
-    "page_number",
-    "sl_no",
-    "name_of_substation",
-    "substation_coordinates",
-    "region",
-    "220kv_bay_no",
-    "400kv_bay_no",
+    "Name of Substation",
+    "Substation Coordinates",
+    "Voltage Level",
+    "Bay No",
+    "Connectivity Quantum (MW)",
+    "Name of Entity",
 ]
-
-
-def _format_bay_dict(bay_dict: dict) -> str:
-    """Serialize a bay_no dict {bay: entity} into a readable string.
-
-    Example: {"204": "ABC", "34": ""} → "204: ABC | 34: "
-    """
-    if not bay_dict:
-        return ""
-    return " | ".join(f"{k}: {v}" for k, v in bay_dict.items())
 
 
 # ─── Cache helpers ────────────────────────────────────────────────────────────
@@ -88,29 +76,42 @@ def _load_json(path: Path) -> dict:
 
 
 def _flatten(all_results: list[dict]) -> list[dict]:
-    """Flatten per-PDF, per-page, per-substation into flat rows for Excel.
+    """Flatten per-PDF, per-page, per-substation into one row per bay entry.
 
-    Each substation becomes one row.  The 220kV/400kV bay_no dicts are
-    serialized as "bay: entity | bay: entity" for readability.
+    Each allocation entry (individual bay) becomes its own Excel row.
+    Substation name and coordinates are repeated for every bay belonging
+    to that substation.
     """
     flat: list[dict] = []
     for pdf_result in all_results:
-        source = pdf_result.get("source", "")
         for page in pdf_result.get("pages", []):
-            pnum = page.get("page_number")
             for sub in page.get("substations", []):
-                kv220 = sub.get("220kv", {})
-                kv400 = sub.get("400kv", {})
-                flat.append({
-                    "source_pdf":              source,
-                    "page_number":             pnum,
-                    "sl_no":                   sub.get("sl_no", ""),
-                    "name_of_substation":      sub.get("name_of_substation", ""),
-                    "substation_coordinates":  sub.get("substation_coordinates", ""),
-                    "region":                  sub.get("region", ""),
-                    "220kv_bay_no":            _format_bay_dict(kv220.get("bay_no", {})),
-                    "400kv_bay_no":            _format_bay_dict(kv400.get("bay_no", {})),
-                })
+                sub_name   = sub.get("name_of_substation", "")
+                sub_coords = sub.get("substation_coordinates", "")
+
+                allocations = sub.get("allocations", [])
+                if not allocations:
+                    # Substation exists but has no allocation entries —
+                    # still emit one row so it appears in the Excel.
+                    flat.append({
+                        "Name of Substation":        sub_name,
+                        "Substation Coordinates":    sub_coords,
+                        "Voltage Level":             "",
+                        "Bay No":                    "",
+                        "Connectivity Quantum (MW)": "",
+                        "Name of Entity":            "",
+                    })
+                    continue
+
+                for entry in allocations:
+                    flat.append({
+                        "Name of Substation":        sub_name,
+                        "Substation Coordinates":    sub_coords,
+                        "Voltage Level":             entry.get("voltage_key", ""),
+                        "Bay No":                    entry.get("bay_no", ""),
+                        "Connectivity Quantum (MW)": entry.get("connectivity_quantum_mw", ""),
+                        "Name of Entity":            entry.get("name_of_entity", ""),
+                    })
     return flat
 
 
@@ -138,7 +139,8 @@ def run_bayallocation_extraction(
     Returns
     -------
     pd.DataFrame
-        Flat DataFrame with one row per substation extracted.
+        Flat DataFrame with one row per bay entry (allocation).
+        Substation name/coordinates are repeated for each bay.
     """
     src  = Path(source_dir).resolve() if source_dir else BAY_SOURCE_DIR
     out  = Path(output_dir).resolve() if output_dir else BAY_OUTPUT_DIR
@@ -216,6 +218,7 @@ def run_bayallocation_extraction(
     print(f"    PDFs processed  : {total_pdfs}")
     print(f"    Pages matched   : {total_pages}")
     print(f"    Substations     : {total_substations}")
+    print(f"    Bay entries     : {len(flat_rows)}")
     print("=" * 64)
 
     if not flat_rows:
@@ -234,6 +237,7 @@ def run_bayallocation_extraction(
             ("PDFs processed",  total_pdfs),
             ("Pages matched",   total_pages),
             ("Substations",     total_substations),
+            ("Bay entries",     len(flat_rows)),
         ],
     )
     print(f"\n[BayAllocation] Excel → {xlsx}")
