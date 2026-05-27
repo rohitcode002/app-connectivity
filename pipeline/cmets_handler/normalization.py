@@ -590,6 +590,88 @@ def norm_type(v: Optional[str]) -> Optional[str]:
     return components_to_type(components)
 
 
+def enrich_type_with_mw(row: dict) -> Optional[str]:
+    """Build a Type string with MW values from the row context.
+
+    Combines the raw LLM-extracted Type value with capacity evidence from
+    the row's other columns (Application Quantum, Battery, PSP, etc.).
+
+    If the LLM Type already has MW values (e.g. "Solar (300)"), they're
+    preserved.  If only bare keywords (e.g. "Solar"), MW values are
+    looked up from Application Quantum and capacity columns.
+
+    Output format: "Solar (52) + BESS (6.88)"
+    """
+    raw_type = clean(row.get("Type"))
+    if not raw_type:
+        return None
+
+    # ── Step 1: Parse any MW values already in the Type string ───────────
+    existing_buckets = parse_type_capacity(raw_type)
+
+    # ── Step 2: Detect component keywords present in the Type string ────
+    keywords = _components_from_keywords(raw_type)
+
+    # ── Step 3: Enrich from capacity columns if MW values are missing ────
+    # Map component → candidate columns to check for MW values
+    _CAPACITY_SOURCES: dict[str, list[str]] = {
+        "BESS": [
+            "Battery MWh",
+            "Battery Injection (MW)",
+            "Battery Drawl (MW)",
+        ],
+        "PSP": [
+            "PSP MWh",
+            "PSP Injection (MW)",
+            "PSP Drawl (MW)",
+        ],
+    }
+
+    # For BESS / PSP, try to pull MW from their dedicated columns
+    for comp, src_cols in _CAPACITY_SOURCES.items():
+        if comp in keywords and comp not in existing_buckets:
+            for col in src_cols:
+                val = _capacity_value(str(row.get(col, "")))
+                if val > 0:
+                    existing_buckets[comp] = val
+                    break
+
+    # If a single Application Quantum value exists and there's exactly one
+    # non-BESS/PSP component without a value, assign it
+    app_quantum = _capacity_value(
+        str(row.get("Application Quantum (MW)(ST II)", ""))
+    )
+    primary_components = keywords - {"BESS", "PSP"}
+    missing_primary = [c for c in primary_components if c not in existing_buckets]
+
+    if app_quantum > 0 and len(missing_primary) == 1:
+        existing_buckets[missing_primary[0]] = app_quantum
+    elif app_quantum > 0 and len(primary_components) == 1 and not missing_primary:
+        # Already has a value — keep it
+        pass
+
+    # ── Step 4: Build the final Type string ──────────────────────────────
+    order = ["Solar", "Wind", "Hydro", "BESS", "PSP"]
+    all_components = set(existing_buckets.keys()) | keywords
+
+    parts: list[str] = []
+    for comp in order:
+        if comp not in all_components:
+            continue
+        mw = existing_buckets.get(comp)
+        if mw and mw > 0:
+            # Format: remove trailing .0 for whole numbers
+            mw_str = f"{mw:g}"
+            parts.append(f"{comp} ({mw_str})")
+        else:
+            parts.append(comp)
+
+    if not parts:
+        return raw_type  # fallback to raw value
+
+    return " + ".join(parts)
+
+
 # ── norm_voltage ─────────────────────────────────────────────────────────────
 def norm_voltage(v: Optional[str]) -> Optional[str]:
     """Normalise voltage string to '<N> kV' format."""
@@ -814,10 +896,10 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         # ── Derived: State from Project Location ─────────────────────────
         p["State"] = extract_state(p.get("Project Location"))
 
-        # ── Derived: Type (kept raw — no formatting at extraction) ──────
-        # The raw LLM value (e.g. "Solar (24) +BESS (45)") is preserved.
-        # norm_type formatting is applied only in the final formatter.
-        p["Type"] = clean(p.get("Type"))
+        # ── Derived: Type (enriched with MW values from row context) ──────
+        # Combines LLM-extracted type keywords with MW values from capacity
+        # columns to produce e.g. "Solar (52) + BESS (6.88)".
+        p["Type"] = enrich_type_with_mw(p)
 
         # ── Voltage level ────────────────────────────────────────────────
         p["Voltage level"] = norm_voltage(p.get("Voltage level"))

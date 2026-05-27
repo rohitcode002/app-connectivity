@@ -13,9 +13,10 @@ are complete:
             - Matches via GNA/LTA/5.2 IDs found in JCC connectivity_applicant
             - Adds: TGNA, GNA columns
 
-    Step 3: Step2 + Bay Allocation → 07_final_mapped.xlsx
-            - Matches via developer name + voltage level
-            - Adds: Bay No (Bay Allocation), Substation Coordinates (Bay Allocation)
+    Step 3: Step2 + Bay Allocation → 07_cmets_effective_jcc_bayallocation.xlsx
+            - Reads 05_bayallocation_extracted.xlsx directly
+            - Matches via developer name + substation name + voltage level
+            - Populates: Coordinates, Bay No
 
 All mapping uses the CMETS excel as the base — values are picked from
 CMETS rows and searched in the other source data. If a match is found,
@@ -32,8 +33,6 @@ from typing import Optional
 import pandas as pd
 
 from pipeline.mapping_handler.formatting import format_mapped_excel
-from pipeline.bay_mapping_handler.lookup import build_bay_lookup
-from pipeline.bay_mapping_handler.merge import merge_bay_allocation
 from pipeline.shared_utils import safe_str
 
 logger = logging.getLogger(__name__)
@@ -453,62 +452,316 @@ def _step2_jcc_mapping(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 3 — + Bay Allocation Mapping
+# STEP 3 — + Bay Allocation Mapping (Excel-to-Excel)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _normalise_voltage(v: str) -> str:
+    """Normalise voltage strings for cross-sheet comparison.
+
+    '220 kV' → '220kv', '400kV' → '400kv', '220kv' → '220kv'
+    """
+    return re.sub(r"\s+", "", safe_str(v)).lower().strip()
+
+
+def _tokenise(text: str) -> set[str]:
+    """Break a name into lowercase alphanumeric tokens for fuzzy matching."""
+    return set(re.findall(r"[a-z0-9]+", safe_str(text).lower()))
+
+
+def _token_similarity(tokens_a: set[str], tokens_b: set[str]) -> float:
+    """Jaccard-like token overlap ratio (0.0 – 1.0)."""
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
 
 def _step3_bay_mapping(
     df: pd.DataFrame,
-    bay_cache_dir: Path,
+    bay_excel: Path,
     output_excel: Path,
 ) -> pd.DataFrame:
     """Map CMETS (enriched with effectiveness + JCC) to Bay Allocation data.
 
-    Matches developer name + voltage level to bay allocation entries.
+    Reads 05_bayallocation_extracted.xlsx directly and matches each CMETS row
+    by (Substation + Name of Developers + Voltage level) against
+    (Name of Substation + Name of Entity + Voltage Level) in bay allocation.
 
-    Adds: Bay No (Bay Allocation), Substation Name (Bay Allocation),
-          Substation Coordinates (Bay Allocation), Bay No Source
+    On match: populates 'Coordinates' and 'Bay No' columns.
+
+    Output has the EXACT same columns as input plus 'Coordinates' and 'Bay No'
+    if they were not already present. No columns are removed; order is preserved.
     """
     print("\n" + "=" * 64)
     print("  STEP 3 — CMETS × BAY ALLOCATION MAPPING")
     print("=" * 64)
-    print(f"  Input rows             : {len(df)}")
-    print(f"  Bay Allocation cache   : {bay_cache_dir}")
-    print(f"  Output Excel           : {output_excel}")
+    print(f"  Input rows                   : {len(df)}")
+    print(f"  Bay Allocation Excel         : {bay_excel}")
+    print(f"  Output Excel                 : {output_excel}")
     print("=" * 64)
 
-    # Build bay allocation lookup
-    bay_index = build_bay_lookup(bay_cache_dir)
-    total_220 = len(bay_index.get("220kv", []))
-    total_400 = len(bay_index.get("400kv", []))
-    print(f"[Step 3] Bay index: 220kV={total_220} entries, 400kV={total_400} entries")
+    # ── Ensure target columns exist ──────────────────────────────────────
+    if "Coordinates" not in df.columns:
+        df["Coordinates"] = ""
+    if "Bay No" not in df.columns:
+        df["Bay No"] = ""
 
-    if total_220 + total_400 == 0:
-        print("[Step 3] WARNING: No bay allocation data found.")
-        print("[Step 3]  → Run Module 5 (Bay Allocation Extraction) first.")
+    # ── Load Bay Allocation data ─────────────────────────────────────────
+    if not bay_excel.exists():
+        logger.warning("[Step 3] Bay Allocation Excel not found — Coordinates/Bay No stay empty.")
+        print("[Step 3] WARNING: Bay Allocation Excel not found.")
+        df.to_excel(str(output_excel), index=False,
+                    sheet_name="CMETS+Eff+JCC+Bay")
+        return df
 
-    # Merge
-    enriched_df, stats = merge_bay_allocation(df, bay_index)
-    print(
-        f"[Step 3] Results: "
-        f"JCC bay used={stats['jcc_bay_used']} | "
-        f"Matched={stats['matched']} | "
-        f"Multi-match={stats['multi_match']} | "
-        f"No voltage={stats['no_voltage']} | "
-        f"No developer={stats['no_developer']} | "
-        f"Unmatched={stats['unmatched']} | "
-        f"Skipped existing coords={stats['skipped_existing_coordinates']} | "
-        f"Skipped fixed bay no={stats['skipped_fixed_bay_no']} | "
-        f"Total={stats['total_rows']}"
-    )
+    bay_df = pd.read_excel(bay_excel, sheet_name=0, engine="openpyxl")
+    print(f"[Step 3] Bay Allocation rows loaded: {len(bay_df)}")
 
-    # Write final Excel
+    # ── Pre-compute bay allocation index by normalised voltage ───────────
+    # Structure: {"220kv": [(substation_tokens, entity_tokens, bay_row_dict), ...]}
+    bay_index: dict[str, list[tuple[set[str], set[str], dict]]] = {}
+    for _, brow in bay_df.iterrows():
+        voltage = _normalise_voltage(brow.get("Voltage Level", ""))
+        if not voltage:
+            continue
+        sub_tokens = _tokenise(brow.get("Name of Substation", ""))
+        entity_tokens = _tokenise(brow.get("Name of Entity", ""))
+        entry = (sub_tokens, entity_tokens, brow.to_dict())
+        bay_index.setdefault(voltage, []).append(entry)
+
+    total_entries = sum(len(v) for v in bay_index.values())
+    print(f"[Step 3] Bay index built: {total_entries} entries "
+          f"(220kV={len(bay_index.get('220kv', []))}, "
+          f"400kV={len(bay_index.get('400kv', []))})")
+
+    if total_entries == 0:
+        print("[Step 3] WARNING: No valid bay allocation entries found.")
+        df.to_excel(str(output_excel), index=False,
+                    sheet_name="CMETS+Eff+JCC+Bay")
+        return df
+
+    # ── Match each CMETS row ─────────────────────────────────────────────
+    matched_count = 0
+    coords_count = 0
+    bay_count = 0
+    no_voltage_count = 0
+    no_developer_count = 0
+    unmatched_count = 0
+
+    for idx, row in df.iterrows():
+        # Get CMETS substation, developer, and voltage
+        cmets_substation = safe_str(row.get("Substation", ""))
+        cmets_developer = safe_str(row.get("Name of Developers", ""))
+        cmets_voltage = _normalise_voltage(row.get("Voltage level", ""))
+
+        if not cmets_voltage:
+            no_voltage_count += 1
+            continue
+
+        if not cmets_developer:
+            no_developer_count += 1
+            continue
+
+        # Get bay entries for this voltage level
+        candidates = bay_index.get(cmets_voltage, [])
+        if not candidates:
+            unmatched_count += 1
+            continue
+
+        # Tokenise CMETS values
+        cmets_sub_tokens = _tokenise(cmets_substation)
+        cmets_dev_tokens = _tokenise(cmets_developer)
+
+        # Find best match — score = substation_similarity + entity_similarity
+        best_score = 0.0
+        best_entry: dict | None = None
+
+        for bay_sub_tokens, bay_entity_tokens, bay_row in candidates:
+            # Entity/developer match is the primary signal
+            entity_score = _token_similarity(cmets_dev_tokens, bay_entity_tokens)
+            # Substation match is secondary but helps disambiguate
+            sub_score = _token_similarity(cmets_sub_tokens, bay_sub_tokens)
+
+            # Weighted: entity match is 70%, substation match is 30%
+            combined = 0.7 * entity_score + 0.3 * sub_score
+
+            if combined > best_score:
+                best_score = combined
+                best_entry = bay_row
+
+        # Require minimum threshold to avoid false matches
+        if best_score < 0.15 or best_entry is None:
+            unmatched_count += 1
+            continue
+
+        matched_count += 1
+
+        # ── Populate Coordinates from bay allocation ──────────────────
+        bay_coords = safe_str(best_entry.get("Substation Coordinates", ""))
+        if bay_coords:
+            df.at[idx, "Coordinates"] = bay_coords
+            coords_count += 1
+
+        # ── Populate Bay No from bay allocation ───────────────────────
+        bay_no = safe_str(best_entry.get("Bay No", ""))
+        if bay_no:
+            df.at[idx, "Bay No"] = bay_no
+            bay_count += 1
+
+    # ── Write output Excel (same columns, same order) ─────────────────
     output_excel.parent.mkdir(parents=True, exist_ok=True)
-    enriched_df.to_excel(str(output_excel), index=False, sheet_name="Final Mapped Data")
-    format_mapped_excel(str(output_excel))
-    print(f"\n[Step 3] ✓ Excel saved → {output_excel}")
+    df.to_excel(str(output_excel), index=False,
+                sheet_name="CMETS+Eff+JCC+Bay")
+    print(
+        f"\n[Step 3] Results: "
+        f"Matched={matched_count} | "
+        f"Coords populated={coords_count} | "
+        f"Bay No populated={bay_count} | "
+        f"No voltage={no_voltage_count} | "
+        f"No developer={no_developer_count} | "
+        f"Unmatched={unmatched_count} | "
+        f"Total={len(df)}"
+    )
+    print(f"[Step 3] ✓ Excel saved → {output_excel}")
     print("=" * 64)
 
-    return enriched_df
+    return df
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 4 — Format & produce dtbc.xlsx
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _step4_format_dtbc(
+    df: pd.DataFrame,
+    output_excel: Path,
+) -> pd.DataFrame:
+    """Apply column-value formatting to produce dtbc.xlsx.
+
+    Same columns, same order as the input — NO column added or removed.
+
+    Formatting rules applied IN-PLACE on the DataFrame:
+      1. Bay No       → merge JCC bay (preferred) + Bay Allocation bay
+      2. Granted Quantum GNA/LTA(MW)
+                       → populated only when Status = "Granted"
+      3. Type          → recalculated from capacity evidence columns
+      4. Excel styling → headers, borders, alternating row fills
+    """
+    print("\n" + "=" * 64)
+    print("  STEP 4 — FORMAT dtbc.xlsx")
+    print("=" * 64)
+    print(f"  Input rows      : {len(df)}")
+    print(f"  Input columns   : {len(df.columns)}")
+    print(f"  Output Excel    : {output_excel}")
+    print("=" * 64)
+
+    original_columns = list(df.columns)
+
+    # ── 1. Bay No: prefer JCC, fallback to Bay Allocation ────────────────
+    bay_merged = 0
+    if "Bay No (JCC)" in df.columns and "Bay No" in df.columns:
+        for idx, row in df.iterrows():
+            jcc_val = safe_str(row.get("Bay No (JCC)"))
+            bay_val = safe_str(row.get("Bay No"))
+            # JCC bay preferred
+            if jcc_val and jcc_val.lower() not in (
+                "none", "nan", "null", "n/a", "-", ""
+            ):
+                df.at[idx, "Bay No"] = jcc_val
+                bay_merged += 1
+            # else keep existing Bay No from bay allocation (already set)
+    print(f"[Step 4] Bay No: {bay_merged} rows updated from JCC bay")
+
+    # ── 2. Granted Quantum GNA/LTA(MW): only when Status = "Granted" ────
+    granted_col = None
+    for c in df.columns:
+        if "granted" in c.lower() and "quantum" in c.lower():
+            granted_col = c
+            break
+
+    status_col = None
+    for c in df.columns:
+        if "status of application" in c.lower():
+            status_col = c
+            break
+
+    quantum_col = None
+    for c in df.columns:
+        if "application quantum" in c.lower():
+            quantum_col = c
+            break
+
+    granted_count = 0
+    if granted_col and status_col and quantum_col:
+        for idx, row in df.iterrows():
+            status = safe_str(row.get(status_col)).strip().lower()
+            if status == "granted":
+                df.at[idx, granted_col] = row.get(quantum_col)
+                granted_count += 1
+            else:
+                # Clear if status is not "granted"
+                df.at[idx, granted_col] = None
+    print(f"[Step 4] Granted Quantum: {granted_count} rows populated")
+
+    # ── 3. Type: strip MW numbers, keep only keywords ─────────────────
+    #    e.g. "Solar (52) + BESS (6.88)" → "Solar + BESS"
+    #    The MW values were used in Step 1 for capacity breakdown;
+    #    in this formatting layer we keep only the component keywords.
+    type_col = None
+    for c in df.columns:
+        if c.strip() == "Type":
+            type_col = c
+            break
+
+    # Pattern to remove parenthesised numbers: "(52)", "(6.88)", "( 300 )"
+    _MW_PARENS_RE = re.compile(r"\s*\(\s*[\d,.]+\s*\)")
+    # Clean up double-spaces and leading/trailing whitespace after removal
+    _MULTI_SPACE_RE = re.compile(r"\s{2,}")
+
+    type_stripped = 0
+    if type_col:
+        for idx, row in df.iterrows():
+            raw_type = safe_str(row.get(type_col))
+            if not raw_type:
+                continue
+            stripped = _MW_PARENS_RE.sub("", raw_type)
+            stripped = _MULTI_SPACE_RE.sub(" ", stripped).strip()
+            # Clean up leftover separators: " + " at start/end, "++", etc.
+            stripped = re.sub(r"(?:^[+\s]+|[+\s]+$)", "", stripped)
+            stripped = re.sub(r"\s*\+\s*\+\s*", " + ", stripped)
+            if stripped and stripped != raw_type:
+                df.at[idx, type_col] = stripped
+                type_stripped += 1
+    print(f"[Step 4] Type: {type_stripped} rows — MW numbers stripped to keywords only")
+
+    # ── Ensure column order is unchanged ─────────────────────────────────
+    df = df[original_columns]
+
+    # ── Write output Excel ───────────────────────────────────────────────
+    output_excel.parent.mkdir(parents=True, exist_ok=True)
+    df.to_excel(str(output_excel), index=False, sheet_name="DTBC")
+
+    # Apply professional styling
+    try:
+        format_mapped_excel(str(output_excel))
+    except Exception:
+        pass  # Formatting is optional
+
+    print(
+        f"\n[Step 4] Results: "
+        f"Bay No merged={bay_merged} | "
+        f"Granted Quantum={granted_count} | "
+        f"Type stripped={type_stripped} | "
+        f"Total rows={len(df)} | "
+        f"Total columns={len(df.columns)}"
+    )
+    print(f"[Step 4] ✓ Excel saved → {output_excel}")
+    print("=" * 64)
+
+    return df
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -524,7 +777,7 @@ def run_full_mapping_pipeline(
         - 01_cmets_extracted.xlsx
         - 02_effectiveness_extracted.xlsx
         - 04_jcc_extracted.xlsx
-        - 05_bayallocation_extracted.xlsx (or bay allocation JSON cache)
+        - 05_bayallocation_extracted.xlsx
 
     Pipeline:
         Step 1: CMETS + Effectiveness  → 03_cmets_effectiveness_mapped.xlsx
@@ -533,24 +786,29 @@ def run_full_mapping_pipeline(
         Step 2: Step1 + JCC            → 06_cmets_jcc_mapped.xlsx
                 (reads 04_jcc_extracted.xlsx, updates Commissioned
                  TGNA/GNA via gna_lta_id matching)
-        Step 3: Step2 + Bay Allocation → 07_final_mapped.xlsx
+        Step 3: Step2 + Bay Allocation → 07_cmets_effective_jcc_bayallocation.xlsx
+                (reads 05_bayallocation_extracted.xlsx, populates
+                 Coordinates and Bay No via fuzzy name matching)
+        Step 4: Formatting             → dtbc.xlsx
+                (applies column-value formatting: Bay No merge,
+                 Granted Quantum, Type recalculation)
 
-    Returns the path to the final output Excel.
+    Returns the path to the final output Excel (dtbc.xlsx).
     """
     root = start_dir or _START_DIR
     excel_root = root / "excels"
-    output_root = root / "output"
 
     # Input paths
     cmets_excel = excel_root / "01_cmets_extracted.xlsx"
     effectiveness_excel = excel_root / "02_effectiveness_extracted.xlsx"
     jcc_excel = excel_root / "04_jcc_extracted.xlsx"
-    bay_cache = output_root / "bayallocation_cache"
+    bay_excel = excel_root / "05_bayallocation_extracted.xlsx"
 
     # Output paths
     step1_excel = excel_root / "03_cmets_effectiveness_mapped.xlsx"
     step2_excel = excel_root / "06_cmets_jcc_mapped.xlsx"
-    step3_excel = excel_root / "07_final_mapped.xlsx"
+    step3_excel = excel_root / "07_cmets_effective_jcc_bayallocation.xlsx"
+    step4_excel = excel_root / "dtbc.xlsx"
 
     print("\n" + "█" * 64)
     print("  SEQUENTIAL MAPPING PIPELINE")
@@ -558,9 +816,11 @@ def run_full_mapping_pipeline(
     print(f"  Base CMETS Excel      : {cmets_excel}")
     print(f"  Effectiveness Excel   : {effectiveness_excel}")
     print(f"  JCC Excel             : {jcc_excel}")
+    print(f"  Bay Allocation Excel  : {bay_excel}")
     print(f"  Step 1 output         : {step1_excel}")
     print(f"  Step 2 output         : {step2_excel}")
-    print(f"  Step 3 output (FINAL) : {step3_excel}")
+    print(f"  Step 3 output         : {step3_excel}")
+    print(f"  Step 4 output (FINAL) : {step4_excel}")
     print("█" * 64)
 
     # ── Load CMETS base data ──────────────────────────────────────────────
@@ -574,7 +834,7 @@ def run_full_mapping_pipeline(
 
     if cmets_df.empty:
         print("[Pipeline] WARNING: CMETS DataFrame is empty — nothing to map.")
-        return step3_excel
+        return step4_excel
 
     # ── Step 1: CMETS + Effectiveness ─────────────────────────────────────
     step1_df, _ = _step1_effectiveness_mapping(
@@ -591,39 +851,32 @@ def run_full_mapping_pipeline(
     )
 
     # ── Step 3: Step2 + Bay Allocation ────────────────────────────────────
-    final_df = _step3_bay_mapping(
+    step3_df = _step3_bay_mapping(
         df=step2_df.copy(),
-        bay_cache_dir=bay_cache,
+        bay_excel=bay_excel,
         output_excel=step3_excel,
     )
 
-    # ── Step 4: Generate data_to_be_captured.xlsx ─────────────────────────
-    from pipeline.final_mapping_handler.data_capture import generate_data_to_be_captured
-    data_capture_excel = excel_root / "data_to_be_captured.xlsx"
-    try:
-        generate_data_to_be_captured(
-            final_mapped_excel=step3_excel,
-            output_excel=data_capture_excel,
-        )
-    except Exception as exc:
-        print(f"\n  ⚠ data_to_be_captured generation failed: {exc}")
-        import traceback
-        traceback.print_exc()
+    # ── Step 4: Format → dtbc.xlsx ────────────────────────────────────────
+    dtbc_df = _step4_format_dtbc(
+        df=step3_df.copy(),
+        output_excel=step4_excel,
+    )
 
     # ── Final summary ─────────────────────────────────────────────────────
     print("\n" + "█" * 64)
     print("  MAPPING PIPELINE COMPLETE")
     print("  ─────────────────────────────────────────────────────────")
-    print(f"  Total rows        : {len(final_df)}")
-    print(f"  Total columns     : {len(final_df.columns)}")
+    print(f"  Total rows        : {len(dtbc_df)}")
+    print(f"  Total columns     : {len(dtbc_df.columns)}")
     print(f"  Columns:")
-    for col in final_df.columns:
-        non_null = final_df[col].notna().sum()
-        print(f"    {col:<55} {non_null}/{len(final_df)} filled")
+    for col in dtbc_df.columns:
+        non_null = dtbc_df[col].notna().sum()
+        print(f"    {col:<55} {non_null}/{len(dtbc_df)} filled")
     print(f"\n  Step 1 → {step1_excel}")
     print(f"  Step 2 → {step2_excel}")
-    print(f"  Step 3 → {step3_excel} (FINAL)")
-    print(f"  Step 4 → {data_capture_excel} (FILTERED)")
+    print(f"  Step 3 → {step3_excel}")
+    print(f"  Step 4 → {step4_excel} (FINAL)")
     print("█" * 64)
 
-    return step3_excel
+    return step4_excel
