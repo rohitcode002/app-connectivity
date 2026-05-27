@@ -17,7 +17,10 @@ import shutil
 from pathlib import Path
 
 from config import load_runtime_config
-from pipeline.bayallocation_handler.runner import run_bayallocation_extraction
+from pipeline.bayallocation_handler.runner import (
+    run_bayallocation_extraction,
+    run_bayallocation_image_extraction,
+)
 
 _START_DIR = Path(__file__).resolve().parent
 
@@ -34,6 +37,8 @@ def _build_args() -> argparse.Namespace:
                         help="Max pages to process per PDF (-1 = all, default from config)")
     parser.add_argument("--source-dir", default=None,
                         help="Override source PDF directory")
+    parser.add_argument("--image-dir", default=None,
+                        help="Extract Bay Allocation page images from this directory using LLM vision")
     parser.add_argument("--output-dir", default=None,
                         help="Override JSON cache output directory")
     parser.add_argument("--excel-path", default=None,
@@ -54,7 +59,8 @@ def main() -> None:
 
     max_pages = runtime.max_pages
 
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else _START_DIR / "output" / "bayallocation_cache"
+    default_cache = "bayallocation_image_cache" if args.image_dir else "bayallocation_cache"
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else _START_DIR / "output" / default_cache
     if args.clear_cache and output_dir.exists():
         print(f"  Clearing Bay Allocation cache: {output_dir}")
         shutil.rmtree(output_dir)
@@ -64,13 +70,22 @@ def main() -> None:
     print(f"  Max pages per PDF : {max_pages if max_pages != -1 else 'ALL'}")
     print("=" * 64)
 
-    df = run_bayallocation_extraction(
-        source_dir=args.source_dir,
-        output_dir=args.output_dir,
-        excel_path=args.excel_path,
-        runtime=runtime,
-        max_pages=max_pages,
-    )
+    if args.image_dir:
+        df = run_bayallocation_image_extraction(
+            image_dir=args.image_dir,
+            output_dir=output_dir,
+            excel_path=args.excel_path,
+            runtime=runtime,
+            max_pages=max_pages,
+        )
+    else:
+        df = run_bayallocation_extraction(
+            source_dir=args.source_dir,
+            output_dir=output_dir,
+            excel_path=args.excel_path,
+            runtime=runtime,
+            max_pages=max_pages,
+        )
 
     print(f"\n  Bay Allocation extraction complete — {len(df)} rows")
 

@@ -20,7 +20,13 @@ dicts for compatibility, and also emits richer row-level JSON:
 
 from __future__ import annotations
 
+import base64
+import logging
+import mimetypes
 import re
+import time
+from pathlib import Path
+from typing import Any
 from typing import Optional
 
 import pdfplumber
@@ -37,6 +43,95 @@ from pipeline.bayallocation_handler.models import (
     COLUMN_NAMES,
     HEADER_ROW_COUNT,
 )
+from pipeline.shared_utils import parse_json
+from pipeline.token_usage import record_llm_token_usage
+
+logger = logging.getLogger(__name__)
+MODEL = "gpt-4o-mini"
+
+BAY_LLM_SYSTEM_PROMPT = """You extract CTUIL Bay Allocation table data from one PDF page.
+Return only valid JSON. Do not include markdown fences or commentary.
+Preserve text exactly as seen where practical. If a cell is blank, return an empty string.
+Extract only RE Capacity Granted allocation rows, not margin-only or space-provision rows."""
+
+BAY_LLM_USER_TEMPLATE = """Extract Bay Allocation rows from page {page_number}.
+
+Return JSON in this exact shape:
+{{
+  "rows": [
+    {{
+      "sl_no": "",
+      "name_of_substation": "",
+      "substation_coordinates": "",
+      "region": "",
+      "transformation_capacity_planned_mva": "",
+      "transformation_capacity_existing_mva": "",
+      "transformation_capacity_under_implementation_mva": "",
+      "voltage_key": "220kv or 400kv",
+      "bay_no": "",
+      "connectivity_quantum_mw": "",
+      "name_of_entity": "",
+      "margin_bay_no": "",
+      "margin_available_mw": "",
+      "section": ""
+    }}
+  ]
+}}
+
+Rules:
+- The source table has separate RE Capacity Granted groups for 220kV and 400kV. Emit one row per granted bay entry.
+- Carry forward substation fields from row-spanned cells until a new substation begins.
+- Use voltage_key="220kv" for the 220kV grant columns and voltage_key="400kv" for the 400kV grant columns.
+- Include rows even when the entity name is blank if a granted bay number is present.
+- Do not emit section headers, totals, margin-only rows, or space-provision-only rows.
+- If the page has no extractable granted bay rows, return {{"rows": []}}.
+
+PDF page text:
+{page_text}
+
+Extracted table text:
+{table_text}
+"""
+
+BAY_IMAGE_LLM_USER_TEMPLATE = """Extract Bay Allocation rows from this page image.
+This is page {page_number} from image file: {image_name}
+
+Return JSON in this exact shape:
+{{
+  "rows": [
+    {{
+      "sl_no": "",
+      "name_of_substation": "",
+      "substation_coordinates": "",
+      "region": "",
+      "transformation_capacity_planned_mva": "",
+      "transformation_capacity_existing_mva": "",
+      "transformation_capacity_under_implementation_mva": "",
+      "voltage_key": "220kv or 400kv",
+      "bay_no": "",
+      "connectivity_quantum_mw": "",
+      "name_of_entity": "",
+      "margin_bay_no": "",
+      "margin_available_mw": "",
+      "space_provision_220kv": "",
+      "space_provision_400kv": "",
+      "remarks": "",
+      "section": ""
+    }}
+  ]
+}}
+
+Rules:
+- Read the page image carefully; it is a wide spreadsheet-style table.
+- Emit one row per RE Capacity Granted bay allocation entry.
+- For the 220kV RE Capacity Granted columns, use voltage_key="220kv".
+- For the 400kV RE Capacity Granted columns, use voltage_key="400kv".
+- Carry forward merged cells: substation name, coordinates, region, transformation capacity, space provision, and remarks apply to all allocation rows below that substation until the next substation starts.
+- Preserve multi-line entity names in one cell as a single string.
+- Include rows when a bay number exists even if quantum/entity is blank.
+- Do not emit section header rows, purple total rows, margin-only rows, or empty rows.
+- If no allocation rows are visible, return {{"rows": []}}.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +452,151 @@ def _allocation_entry(
     }
 
 
+def _row_value(row: dict, *keys: str) -> str:
+    """Read a value from an LLM row using case/spacing-insensitive keys."""
+    if not isinstance(row, dict):
+        return ""
+    compact_lookup = {_compact(str(k)): v for k, v in row.items()}
+    for key in keys:
+        if key in row:
+            return _clean(row.get(key))
+        compact_key = _compact(key)
+        if compact_key in compact_lookup:
+            return _clean(compact_lookup[compact_key])
+    return ""
+
+
+def _normalise_llm_voltage(row: dict) -> str:
+    voltage = _row_value(row, "voltage_key", "voltage", "Voltage Level")
+    compact = _compact(voltage)
+    if "400" in compact:
+        return "400kv"
+    if "220" in compact:
+        return "220kv"
+    return ""
+
+
+def _iter_llm_rows(result: Any) -> list[dict]:
+    """Accept either {"rows": [...]} or {"substations": [...]} LLM JSON."""
+    if isinstance(result, list):
+        candidates = result
+    elif isinstance(result, dict):
+        if isinstance(result.get("rows"), list):
+            candidates = result["rows"]
+        elif isinstance(result.get("substations"), list):
+            candidates = []
+            for sub in result["substations"]:
+                if not isinstance(sub, dict):
+                    continue
+                allocations = sub.get("allocations")
+                if not isinstance(allocations, list):
+                    continue
+                for alloc in allocations:
+                    if isinstance(alloc, dict):
+                        merged = dict(sub)
+                        merged.update(alloc)
+                        candidates.append(merged)
+        else:
+            candidates = next((v for v in result.values() if isinstance(v, list)), [])
+    else:
+        candidates = []
+
+    return [row for row in candidates if isinstance(row, dict)]
+
+
+def _substations_from_llm_rows(rows: list[dict], page_number: int) -> tuple[list[dict], list[dict]]:
+    """Convert flat LLM allocation rows to the existing Bay JSON schema."""
+    substations: list[dict] = []
+    table_rows: list[dict] = []
+    sub_index: dict[tuple[str, str, str], dict] = {}
+
+    for row_index, row in enumerate(rows, 1):
+        voltage_key = _normalise_llm_voltage(row)
+        bay_no = _row_value(row, "bay_no", "Bay No")
+        entity = _row_value(row, "name_of_entity", "Name of Entity")
+        quantum = _row_value(
+            row,
+            "connectivity_quantum_mw",
+            "connectivity_quantum",
+            "Connectivity Quantum (MW)",
+        )
+        if voltage_key not in {"220kv", "400kv"} or not any([bay_no, entity, quantum]):
+            continue
+
+        sl_no = _row_value(row, "sl_no", "Sl. No.", "Serial No")
+        substation_name = _row_value(row, "name_of_substation", "Name of Substation")
+        coords = _row_value(row, "substation_coordinates", "Substation Coordinates")
+        region = _row_value(row, "region")
+        section = _row_value(row, "section")
+
+        sub_key = (sl_no, substation_name, coords)
+        if sub_key not in sub_index:
+            sub_index[sub_key] = _new_substation(
+                sl_no=sl_no,
+                name=substation_name,
+                coords=coords,
+                region=region,
+                planned=_row_value(row, "transformation_capacity_planned_mva"),
+                existing=_row_value(row, "transformation_capacity_existing_mva"),
+                under_implementation=_row_value(row, "transformation_capacity_under_implementation_mva"),
+            )
+            substations.append(sub_index[sub_key])
+
+        sub = sub_index[sub_key]
+        if not sub.get("space_provision_220kv"):
+            sub["space_provision_220kv"] = _row_value(row, "space_provision_220kv")
+        if not sub.get("space_provision_400kv"):
+            sub["space_provision_400kv"] = _row_value(row, "space_provision_400kv")
+        if not sub.get("remarks"):
+            sub["remarks"] = _row_value(row, "remarks")
+        margin_bay_no = _row_value(row, "margin_bay_no")
+        margin_available = _row_value(row, "margin_available_mw")
+        entry = _allocation_entry(
+            page_number=page_number,
+            table_row_index=row_index,
+            section=section,
+            voltage_key=voltage_key,
+            bay_no=bay_no,
+            quantum=quantum,
+            entity=entity,
+            margin_bay_no=margin_bay_no,
+            margin_available=margin_available,
+            substation=sub,
+        )
+        sub[voltage_key]["bay_no"][bay_no] = entity
+        sub[voltage_key]["entries"].append(entry)
+        sub["allocations"].append(entry)
+
+        norm = [""] * len(COLUMN_NAMES)
+        norm[0] = sub.get("sl_no", "")
+        norm[1] = sub.get("name_of_substation", "")
+        norm[2] = sub.get("substation_coordinates", "")
+        norm[3] = sub.get("region", "")
+        norm[4] = sub.get("transformation_capacity_planned_mva", "")
+        norm[5] = sub.get("transformation_capacity_existing_mva", "")
+        norm[6] = sub.get("transformation_capacity_under_implementation_mva", "")
+        norm[17] = sub.get("space_provision_220kv", "")
+        norm[18] = sub.get("space_provision_400kv", "")
+        norm[19] = sub.get("remarks", "")
+        if voltage_key == "220kv":
+            norm[7], norm[8], norm[9] = bay_no, quantum, entity
+            norm[13], norm[14] = margin_bay_no, margin_available
+        else:
+            norm[10], norm[11], norm[12] = bay_no, quantum, entity
+            norm[15], norm[16] = margin_bay_no, margin_available
+        table_rows.append(
+            _table_row_record(
+                page_number=page_number,
+                table_row_index=row_index,
+                section=section,
+                row=norm,
+                substation=sub,
+            )
+        )
+
+    return substations, table_rows
+
+
 def _table_row_record(
     *,
     page_number: int,
@@ -422,10 +662,225 @@ def _camelot_to_raw_rows(camelot_tables) -> list[list[str]]:
     return all_rows
 
 
-def extract_page_data(page, page_number: int, pdf_path: str = "") -> Optional[dict]:
+def _page_table_text(page) -> str:
+    """Render pdfplumber table cells as compact tab-separated text for LLM input."""
+    chunks: list[str] = []
+    try:
+        tables = page.extract_tables() or []
+    except Exception:
+        tables = []
+    for table_index, table in enumerate(tables, 1):
+        chunks.append(f"[table {table_index}]")
+        for row in table or []:
+            chunks.append("\t".join(_clean(cell) for cell in (row or [])))
+    text = "\n".join(chunks)
+    return text[:50000]
+
+
+def llm_extract_page_data(
+    page_text: str,
+    table_text: str,
+    page_number: int,
+    runtime,
+    pdf_name: str = "",
+) -> Optional[dict]:
+    """Extract one Bay Allocation page with the configured LLM runtime."""
+    if runtime is None or (not getattr(runtime, "vm_mode", False) and not getattr(runtime, "api_key", "")):
+        print(f"      [page {page_number}] Bay LLM not configured — using table parser fallback")
+        return None
+
+    try:
+        from llm_client import call_llm, extract_text_from_response
+    except Exception as exc:
+        print(f"      [page {page_number}] Bay LLM unavailable: {exc} — using fallback")
+        return None
+
+    prompt = {
+        "messages": [
+            {"role": "system", "content": BAY_LLM_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": BAY_LLM_USER_TEMPLATE.format(
+                    page_number=page_number,
+                    page_text=(page_text or "")[:50000],
+                    table_text=table_text or "(no table cells extracted)",
+                ),
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": 8000,
+    }
+
+    print(f"      [page {page_number}] Sending Bay Allocation page to LLM …")
+    for attempt in range(3):
+        try:
+            resp = call_llm(
+                prompt,
+                vm=runtime.vm_mode,
+                api_key=runtime.api_key or None,
+                model=MODEL,
+                script_path=runtime.llm_script_path,
+            )
+            content = extract_text_from_response(resp)
+            totals = record_llm_token_usage(
+                "bayallocation",
+                prompt,
+                resp,
+                content,
+                pdf_name=pdf_name,
+                page_number=page_number,
+                purpose="page_allocation_extraction",
+                model=MODEL,
+            )
+            total_display = totals["total_tokens"] + totals["estimated_total_tokens"]
+            rows = _iter_llm_rows(parse_json(content))
+            substations, table_rows = _substations_from_llm_rows(rows, page_number)
+            if not substations:
+                print(f"      [page {page_number}] Bay LLM returned 0 usable rows (tokens total: {total_display})")
+                return None
+
+            print(
+                f"      [page {page_number}] Bay LLM extracted "
+                f"{sum(len(s.get('allocations', [])) for s in substations)} rows "
+                f"across {len(substations)} substations (tokens total: {total_display})"
+            )
+            return {
+                "page_number": page_number,
+                "raw_text": page_text or "",
+                "columns": COLUMN_NAMES,
+                "table_rows": table_rows,
+                "substations": substations,
+                "extraction_method": "llm",
+            }
+        except Exception as exc:
+            if attempt < 2:
+                print(f"      [page {page_number}] Bay LLM attempt {attempt + 1} failed, retrying …")
+                logger.warning(
+                    "[BayAllocation] page=%d llm retry attempt=%d error=%s",
+                    page_number,
+                    attempt + 1,
+                    exc,
+                )
+                time.sleep(5)
+            else:
+                print(f"      [page {page_number}] Bay LLM failed: {exc} — using fallback")
+                logger.error("[BayAllocation] page=%d llm failed error=%s", page_number, exc)
+    return None
+
+
+def _image_data_url(image_path: str | Path) -> str:
+    path = Path(image_path)
+    mime = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
+def extract_bayallocation_image(
+    image_path: str | Path,
+    page_number: int,
+    runtime,
+) -> Optional[dict]:
+    """Extract one Bay Allocation page image using LLM vision."""
+    path = Path(image_path)
+    if runtime is None or (not getattr(runtime, "vm_mode", False) and not getattr(runtime, "api_key", "")):
+        print(f"      [page {page_number}] Bay image LLM not configured — image not extracted")
+        return None
+
+    try:
+        from llm_client import call_llm, extract_text_from_response
+    except Exception as exc:
+        print(f"      [page {page_number}] Bay image LLM unavailable: {exc}")
+        return None
+
+    prompt = {
+        "messages": [
+            {"role": "system", "content": BAY_LLM_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": BAY_IMAGE_LLM_USER_TEMPLATE.format(
+                            page_number=page_number,
+                            image_name=path.name,
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": _image_data_url(path),
+                            "detail": "high",
+                        },
+                    },
+                ],
+            },
+        ],
+        "temperature": 0,
+        "max_tokens": 10000,
+    }
+
+    print(f"      [page {page_number}] Sending Bay Allocation image to LLM …")
+    for attempt in range(3):
+        try:
+            resp = call_llm(
+                prompt,
+                vm=runtime.vm_mode,
+                api_key=runtime.api_key or None,
+                model=MODEL,
+                script_path=runtime.llm_script_path,
+            )
+            content = extract_text_from_response(resp)
+            totals = record_llm_token_usage(
+                "bayallocation",
+                prompt,
+                resp,
+                content,
+                pdf_name=path.name,
+                page_number=page_number,
+                purpose="page_image_allocation_extraction",
+                model=MODEL,
+            )
+            total_display = totals["total_tokens"] + totals["estimated_total_tokens"]
+            rows = _iter_llm_rows(parse_json(content))
+            substations, table_rows = _substations_from_llm_rows(rows, page_number)
+            if not substations:
+                print(f"      [page {page_number}] Bay image LLM returned 0 usable rows (tokens total: {total_display})")
+                return None
+
+            print(
+                f"      [page {page_number}] Bay image LLM extracted "
+                f"{sum(len(s.get('allocations', [])) for s in substations)} rows "
+                f"across {len(substations)} substations (tokens total: {total_display})"
+            )
+            return {
+                "page_number": page_number,
+                "raw_text": "",
+                "columns": COLUMN_NAMES,
+                "table_rows": table_rows,
+                "substations": substations,
+                "extraction_method": "llm_image",
+            }
+        except Exception as exc:
+            if attempt < 2:
+                print(f"      [page {page_number}] Bay image LLM attempt {attempt + 1} failed, retrying …")
+                logger.warning(
+                    "[BayAllocation] image=%s page=%d llm retry attempt=%d error=%s",
+                    path.name,
+                    page_number,
+                    attempt + 1,
+                    exc,
+                )
+                time.sleep(5)
+            else:
+                print(f"      [page {page_number}] Bay image LLM failed: {exc}")
+                logger.error("[BayAllocation] image=%s page=%d llm failed error=%s", path.name, page_number, exc)
+    return None
+
+
+def extract_page_data(page, page_number: int, pdf_path: str = "", runtime=None) -> Optional[dict]:
     """Extract all substations from one page.
 
-    Uses Camelot as primary table extractor, pdfplumber as fallback.
+    Uses the configured LLM first, then Camelot/pdfplumber as fallback.
     Each unique substation (identified by sl_no appearing in column 0)
     becomes **exactly one item** in the returned ``substations`` list.
     Each bay number is mapped to its entity name (or empty string) in
@@ -433,6 +888,18 @@ def extract_page_data(page, page_number: int, pdf_path: str = "") -> Optional[di
 
     Returns None if no allocation table is found on this page.
     """
+    page_text = page.extract_text() or ""
+    table_text = _page_table_text(page)
+    llm_result = llm_extract_page_data(
+        page_text,
+        table_text,
+        page_number,
+        runtime,
+        pdf_name=Path(pdf_path).name if pdf_path else "",
+    )
+    if llm_result is not None:
+        return llm_result
+
     target = None
     target_table = None  # pdfplumber table object (for cell-level extraction)
     extraction_method = ""
@@ -616,10 +1083,11 @@ def extract_page_data(page, page_number: int, pdf_path: str = "") -> Optional[di
 
     return {
         "page_number":  page_number,
-        "raw_text":     page.extract_text() or "",
+        "raw_text":     page_text,
         "columns":      COLUMN_NAMES,
         "table_rows":   table_rows,
         "substations":  substations,
+        "extraction_method": extraction_method,
     }
 
 
@@ -627,11 +1095,11 @@ def extract_page_data(page, page_number: int, pdf_path: str = "") -> Optional[di
 # Single-PDF extraction
 # ---------------------------------------------------------------------------
 
-def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1) -> list[dict]:
+def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1, runtime=None) -> list[dict]:
     """Extract all pages from one Bay Allocation PDF.
 
-    Uses Camelot as primary table extractor (higher accuracy) with
-    pdfplumber as fallback when Camelot finds no tables.
+    Uses the configured LLM page-wise first. If LLM is unavailable or returns
+    no usable rows for a page, falls back to Camelot/pdfplumber table parsing.
 
     Parameters
     ----------
@@ -664,7 +1132,7 @@ def extract_bayallocation_pdf(pdf_path: str, max_pages: int = -1) -> list[dict]:
                 print(f"  o Page {page_number:3d} -- skipped (keyword gate)")
                 continue
 
-            result = extract_page_data(page, page_number, pdf_path=pdf_path)
+            result = extract_page_data(page, page_number, pdf_path=pdf_path, runtime=runtime)
             if result is None:
                 print(f"  o Page {page_number:3d} -- no allocation table found")
                 continue
