@@ -27,6 +27,8 @@ app-connectivity-pdfs/
 minutes_pdfs/
 page_chunks/
 
+excels
+
 # ─── Output / cache folders (generated at runtime) ────────────────────────────
 output/
 source_output/
