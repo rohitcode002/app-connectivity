@@ -835,6 +835,29 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         if not (has_gna or has_lta or has_enh):
             continue
 
+        # ── Intra-row ID dedup ────────────────────────────────────────────
+        # Ensure the same numeric ID does not appear in multiple columns.
+        # Priority: GNA > Enhancement 5.2 > LTA. If an ID in LTA matches
+        # one already in GNA or Enh 5.2, clear it from LTA (and vice versa).
+        gna_ids = _id_tokens(p.get("GNA/ST II Application ID"))
+        enh_ids = _id_tokens(p.get("Application ID under Enhancement 5.2 or revision"))
+        lta_ids = _id_tokens(p.get("LTA Application ID"))
+
+        # LTA vs GNA/Enh — if LTA ID overlaps with GNA or Enh, clear LTA
+        if lta_ids and (lta_ids & gna_ids or lta_ids & enh_ids):
+            p["LTA Application ID"] = None
+            has_lta = False
+            print(f"      [ID Dedup] LTA ID cleared — same ID already in GNA/Enh 5.2")
+
+        # Enh vs GNA — if Enhancement ID overlaps with GNA, clear Enh
+        if enh_ids and enh_ids & gna_ids:
+            p["Application ID under Enhancement 5.2 or revision"] = None
+            has_enh = False
+            print(f"      [ID Dedup] Enh 5.2 ID cleared — same ID already in GNA")
+
+        if not (has_gna or has_lta or has_enh):
+            continue
+
         # ── Date columns ─────────────────────────────────────────────────
         p["Application/Submission Date"] = extract_date(p.get("Application/Submission Date"))
         p["Applied Start of Connectivity sought by developer date"

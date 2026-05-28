@@ -58,6 +58,10 @@ SKIP RULES — DO NOT extract rows if:
 - For "GNA Operationalization (Yes/No)" return null (computed in post-processing).
 - If multiple dates appear for one date field, post-processing keeps the latest parsed date.
 - For "Status of application..." map wording to only: Withdrawn / granted / Revoked / Applied.
+  CRITICAL: The status is usually NOT in a table column — it is in the DESCRIPTION/NARRATIVE
+  paragraph that accompanies each table row (below the table in PDF, may appear beside/left in text).
+  You MUST read the description text for keywords: "granted" → granted, "withdrawn" → Withdrawn,
+  "revoked"/"cancelled"/"rejected" → Revoked. Only use "Applied" if none of these keywords appear.
   Treat revoked/cancelled/rejected as Revoked; treat missing status, pending/submitted/under process as Applied.
 - PSP values: fill only when pump storage / PSP wording is explicitly present.
   Detect PSP from "Nature of Applicant" (e.g. "Pumped Storage") or "Type" fields.
