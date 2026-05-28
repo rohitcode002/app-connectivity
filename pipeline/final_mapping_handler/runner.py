@@ -108,6 +108,78 @@ def _parse_type_mw(type_str: str) -> dict[str, float]:
     return result
 
 
+_TYPE_TO_CAPACITY_COL = {
+    "solar": "Installed/Break-up Capacity (MW) Solar",
+    "wind": "Installed/Break-up Capacity (MW) Wind",
+    "hybrid": "Installed/Break-up Capacity (MW) Hybrid",
+    "hydro": "Installed/Break-up Capacity (MW) Hydro",
+}
+
+_TYPE_TO_EFF_KEY = {
+    "solar": "solar",
+    "wind": "wind",
+    "hydro": "hydro",
+    "hybrid": None,
+}
+
+_CMETS_TYPE_KEYS = {
+    "solar": ["solar"],
+    "wind": ["wind"],
+    "hydro": ["hydro"],
+    "hybrid": ["hybrid"],
+}
+
+
+def _set_installed_breakdown_from_type(
+    df: pd.DataFrame,
+    idx: int,
+    row: pd.Series,
+    eff_rec: dict | None = None,
+) -> bool:
+    """Set install breakdown columns from effectiveness first, then Type MW."""
+    cmets_type_mw = _parse_type_mw(safe_str(row.get("Type")))
+    eff_type = safe_str(eff_rec.get("type_of_project")).lower() if eff_rec else ""
+    eff_mw = {
+        "solar": _safe_float(eff_rec.get("solar_mw")) if eff_rec else 0.0,
+        "wind": _safe_float(eff_rec.get("wind_mw")) if eff_rec else 0.0,
+        "hydro": _safe_float(eff_rec.get("hydro_mw")) if eff_rec else 0.0,
+        "ess": _safe_float(eff_rec.get("ess_mw")) if eff_rec else 0.0,
+    }
+
+    row_has_capacity = False
+    for type_keyword, capacity_col in _TYPE_TO_CAPACITY_COL.items():
+        if capacity_col not in df.columns:
+            continue
+
+        existing_val = _safe_float(df.at[idx, capacity_col])
+        if existing_val > 0:
+            row_has_capacity = True
+            continue
+
+        if type_keyword == "hybrid":
+            eff_val = sum(v for v in eff_mw.values() if v > 0) if eff_rec else 0.0
+        else:
+            eff_key = _TYPE_TO_EFF_KEY[type_keyword]
+            eff_val = eff_mw.get(eff_key, 0.0) if eff_key else 0.0
+
+        cmets_val = 0.0
+        for tk in _CMETS_TYPE_KEYS.get(type_keyword, []):
+            cmets_val += cmets_type_mw.get(tk, 0.0)
+
+        has_eff_type = type_keyword in eff_type
+        if type_keyword == "hybrid":
+            has_eff_type = "hybrid" in eff_type
+        if not has_eff_type and cmets_val <= 0:
+            continue
+
+        value = eff_val if eff_val > 0 else cmets_val
+        if value > 0:
+            df.at[idx, capacity_col] = value
+            row_has_capacity = True
+
+    return row_has_capacity
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 1 — CMETS + Effectiveness Mapping
 # ─────────────────────────────────────────────────────────────────────────────
@@ -223,6 +295,8 @@ def _step1_effectiveness_mapping(
                     break
 
         if eff_rec is None:
+            if _set_installed_breakdown_from_type(cmets_df, idx, row):
+                capacity_computed += 1
             unmatched += 1
             continue
 
@@ -246,74 +320,8 @@ def _step1_effectiveness_mapping(
             cmets_df.at[idx, "Application Quantum (MW)(ST II)"] = eff_rec["installed_capacity_mw"]
 
         # ── Installed/Break-up Capacity computation ───────────────────
-        # Parse CMETS Type for MW values: "Solar(40)+BESS(34)" → {"solar": 40, "bess": 34}
-        cmets_type_str = safe_str(row.get("Type"))
-        cmets_type_mw = _parse_type_mw(cmets_type_str)
-
-        # Check effectiveness type_of_project keyword
-        eff_type = safe_str(eff_rec.get("type_of_project")).lower()
-
-        # Effectiveness MW columns
-        eff_mw = {
-            "solar": _safe_float(eff_rec.get("solar_mw")),
-            "wind":  _safe_float(eff_rec.get("wind_mw")),
-            "hydro": _safe_float(eff_rec.get("hydro_mw")),
-            "ess":   _safe_float(eff_rec.get("ess_mw")),
-        }
-
-        # Map: effectiveness type keyword → CMETS capacity column
-        _TYPE_TO_CAPACITY_COL = {
-            "solar":  "Installed/Break-up Capacity (MW) Solar",
-            "wind":   "Installed/Break-up Capacity (MW) Wind",
-            "hybrid": "Installed/Break-up Capacity (MW) Hybrid",
-            "hydro":  "Installed/Break-up Capacity (MW) Hydro",
-        }
-
-        # Map: effectiveness type keyword → which eff_mw key to use
-        _TYPE_TO_EFF_KEY = {
-            "solar": "solar",
-            "wind":  "wind",
-            "hydro": "hydro",
-            "hybrid": None,  # hybrid sums all
-        }
-
-        row_has_capacity = False
-
-        for type_keyword, capacity_col in _TYPE_TO_CAPACITY_COL.items():
-            if type_keyword not in eff_type:
-                continue
-
-            # Get effectiveness MW for this type
-            if type_keyword == "hybrid":
-                # Hybrid = sum of all effectiveness MW
-                eff_val = sum(v for v in eff_mw.values() if v > 0)
-            else:
-                eff_key = _TYPE_TO_EFF_KEY[type_keyword]
-                eff_val = eff_mw.get(eff_key, 0.0)
-
-            # Get CMETS Type parsed MW for matching keyword
-            # Map type keywords to what appears in CMETS Type text
-            _CMETS_TYPE_KEYS = {
-                "solar": ["solar"],
-                "wind":  ["wind"],
-                "hydro": ["hydro", "psp", "pump storage"],
-                "hybrid": ["solar", "wind", "hydro"],
-            }
-            cmets_val = 0.0
-            for tk in _CMETS_TYPE_KEYS.get(type_keyword, []):
-                cmets_val += cmets_type_mw.get(tk, 0.0)
-
-            total = eff_val + cmets_val
-            if total > 0:
-                cmets_df.at[idx, capacity_col] = total
-                row_has_capacity = True
-
-        # Also handle ESS/BESS — ess in effectiveness maps to Battery
-        # ESS is NOT an Installed/Break-up Capacity column but we check
-        # if BESS is in Type and ess_mw > 0, we still need to note it.
-        # (BESS goes to Battery columns which are already extracted)
-
-        if row_has_capacity:
+        # Effectiveness values win when present; otherwise use CMETS Type MW.
+        if _set_installed_breakdown_from_type(cmets_df, idx, row, eff_rec):
             capacity_computed += 1
 
     # ── Write output Excel (same columns as CMETS, no add/remove) ─────
@@ -525,6 +533,7 @@ def _step3_bay_mapping(
         df["Coordinates"] = ""
     if "Bay No" not in df.columns:
         df["Bay No"] = ""
+    _make_columns_assignable(df, ["Coordinates", "Bay No"])
 
     # ── Load Bay Allocation data ─────────────────────────────────────────
     if not bay_excel.exists():

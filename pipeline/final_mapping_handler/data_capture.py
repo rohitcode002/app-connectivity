@@ -34,6 +34,7 @@ from pipeline.shared_utils import (
     components_from_type_keywords,
     components_to_type,
     find_col,
+    parse_type_capacity,
     safe_float,
     safe_str,
 )
@@ -250,6 +251,23 @@ _SUBSTATION_NOISE_RE = re.compile(
 
 _STATION_MARKER_RE = re.compile(
     r"(?:\s*\(?\b(?:PS|SS|GSS|S/S|S\.S\.|S\s*/\s*S)\b\.?\)?)+\s*$",
+    re.IGNORECASE,
+)
+
+_INSTALL_BREAKDOWN_COLUMNS = {
+    "Installed/Break-up Capacity (MW) Solar": "Solar",
+    "Installed/Break-up Capacity (MW) Wind": "Wind",
+    "Installed/Break-up Capacity (MW) Hybrid": "Hybrid",
+    "Installed/Break-up Capacity (MW) Hydro": "Hydro",
+}
+
+_DURATION_HOURS_RE = re.compile(
+    r"\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|hourse)\b",
+    re.IGNORECASE,
+)
+_BESS_DURATION_RE = re.compile(
+    r"(?:\bbess\b.{0,50}\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|hr|hourse)\b|"
+    r"\b\d+(?:\.\d+)?\s*(?:hours?|hrs?|hr|hourse)\b.{0,50}\bbess\b)",
     re.IGNORECASE,
 )
 
@@ -532,6 +550,75 @@ def _resolve_granted_quantum(df: pd.DataFrame) -> pd.Series:
     return result
 
 
+def _resolve_install_breakdown(df: pd.DataFrame, final_name: str) -> pd.Series:
+    """Resolve install breakdown from upstream value, then CMETS Type MW."""
+    component = _INSTALL_BREAKDOWN_COLUMNS[final_name]
+    source_col = _find_source_col(
+        df,
+        [
+            final_name,
+            final_name.replace("Installed/Break-up Capacity (MW)", "Installed capacity (MW)").lower(),
+        ],
+    )
+    type_col = find_col(df, "Type")
+
+    if source_col:
+        result = df[source_col].copy()
+    else:
+        result = pd.Series([None] * len(df), index=df.index)
+
+    if type_col is None:
+        return result
+
+    for idx, row in df.iterrows():
+        if safe_float(result.at[idx]) > 0:
+            continue
+
+        capacities = parse_type_capacity(row.get(type_col))
+        type_value = capacities.get(component, 0.0)
+        if type_value > 0:
+            result.at[idx] = type_value
+
+    return result
+
+
+def _battery_duration_hours(row: pd.Series) -> float:
+    """Return BESS duration hours from row text, or 0 when absent."""
+    text = " ".join(safe_str(v) for v in row.values)
+    if not re.search(r"\bbess\b", text, re.IGNORECASE):
+        return 0.0
+    if not _BESS_DURATION_RE.search(text):
+        return 0.0
+
+    match = _DURATION_HOURS_RE.search(text)
+    if not match:
+        return 0.0
+    return safe_float(match.group(1))
+
+
+def _resolve_battery_mwh(df: pd.DataFrame) -> pd.Series:
+    """Keep Battery MWh only when BESS has an hour/duration phrase."""
+    mwh_col = _find_source_col(df, ["Battery MWh"])
+    inj_col = _find_source_col(df, ["Battery Injection (MW)"])
+
+    result = pd.Series([None] * len(df), index=df.index)
+    for idx, row in df.iterrows():
+        duration = _battery_duration_hours(row)
+        if duration <= 0:
+            continue
+
+        existing_mwh = safe_float(row.get(mwh_col)) if mwh_col else 0.0
+        if existing_mwh > 0:
+            result.at[idx] = existing_mwh
+            continue
+
+        injection = safe_float(row.get(inj_col)) if inj_col else 0.0
+        if injection > 0:
+            result.at[idx] = injection * duration
+
+    return result
+
+
 def _resolve_type(df: pd.DataFrame) -> pd.Series:
     """Recalculate final Type from CMETS + RE-effectiveness capacity evidence."""
     type_col = find_col(df, "Type")
@@ -663,6 +750,16 @@ def generate_data_to_be_captured(
         # Calculated from status + application quantum, never extracted/copied.
         if final_name == "Granted  Quantum GNA/LTA(MW)":
             output_data[final_name] = _resolve_granted_quantum(df)
+            mapped_cols.append(final_name)
+            continue
+
+        if final_name in _INSTALL_BREAKDOWN_COLUMNS:
+            output_data[final_name] = _resolve_install_breakdown(df, final_name)
+            mapped_cols.append(final_name)
+            continue
+
+        if final_name == "Battery MWh":
+            output_data[final_name] = _resolve_battery_mwh(df)
             mapped_cols.append(final_name)
             continue
 

@@ -28,7 +28,8 @@ def clean(v):
 SYSTEM_PROMPT = """\
 You are an expert data extractor. Extract the Battery Energy Storage System (BESS) parameters from the provided text.
 Look for:
-1. Battery MWh capacity. Also check if the Type string specifies BESS (X) where X is the MWh.
+1. Battery MWh capacity. Do NOT treat plain BESS (X) as MWh by itself;
+   BESS (X) is MW/injection unless an hour duration is present.
 2. Battery Injection (MW).
 3. Battery Drawl (MW).
 4. Duration in hours if mentioned (e.g. "4 hours", "four (4) hours", "2 hrs").
