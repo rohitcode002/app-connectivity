@@ -68,10 +68,12 @@ SKIP RULES — DO NOT extract rows if:
   Look for "Max Injection" and "Max Drawl" / "Drawal" values in PSP-context rows.
   IMPORTANT: if PSP Injection/Drawl are populated, set Battery Injection (MW) to null.
 - Battery values: fill only when BESS / Battery wording is explicitly present.
-  If a duration is found in the text (e.g. "4 hours", "four (4) hours") and
-  Battery MWh is NOT explicitly stated, compute: Battery MWh = Battery Injection (MW) × duration_hours.
+  If a duration is found in the text (e.g. "4 hours", "four (4) hours", "BESS 4 Hr",
+  "BESS 2 Hr") and Battery MWh is NOT explicitly stated, compute:
+  Battery MWh = Battery Injection (MW) × duration_hours.
   IMPORTANT: If BESS is present but NO duration is mentioned and MWh is NOT
-  explicitly stated, set Battery MWh to 0 (zero), NOT null.
+  explicitly stated, set Battery MWh to null, NOT 0.
+  Only set Battery MWh to a computed value when duration is available.
 - "type" MUST use only these component labels: Solar, Wind, Hydro, BESS, PSP
   with associated MW values in parentheses if present.
   Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)", "BESS (50)", or null.

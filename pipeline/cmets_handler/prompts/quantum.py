@@ -18,36 +18,44 @@ VARIANTS = [
     "Existing connectivity App. no. & Quantum",
     "App. No. & Conn. Quantum (MW) of already granted Connectivity",
     "App. No. & Conn. Quantum (MW)",
-    "Planned additional capacity (MW)",
     "App. No. & Quantum (MW)",
-    "Additional Generation Capacity",
 ]
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
-Application Quantum: the MW capacity APPLIED for.
+Application Quantum: the MW capacity APPLIED for — this is the EXISTING
+connectivity quantum, NOT the additional/planned capacity.
 (Granted Quantum is computed in post-processing — do NOT extract it.)
 
-IMPORTANT — Extracting MW from combined App No. & Quantum columns:
-Some tables have columns like "App. No. & Conn. Quantum (MW) of already granted
-Connectivity" or "Existing connectivity App. no. & Quantum" where the cell
-contains BOTH an application number AND a MW value together, for example:
-  "0412100008(100 MW)" or "0412100010 (150 MW)" or "1200003502 (250 MW)"
-In such cases, extract ONLY the MW numeric value (e.g. "100", "150", "250")
-as the Application Quantum, NOT the full application number.
+CRITICAL — Where to find Application Quantum:
+Application Quantum comes from the MW values embedded inside the
+"App. No. & Quantum (MW)" or "App. No. & Conn. Quantum (MW) of already
+granted Connectivity" columns. These cells contain BOTH an application
+number AND a MW value together, for example:
+  "0412100008(100 MW)" → Application Quantum = 100
+  "0412100010 (150 MW)" → Application Quantum = 150
+  "1200003502 (250 MW)" → Application Quantum = 250
+  "0212100033(300MW)" → Application Quantum = 300
+In such cases, extract ONLY the MW numeric value.
 
-IMPORTANT — Multiple App IDs with MW values:
+CRITICAL — Multiple App IDs with MW values:
 When a row has MULTIPLE application IDs with MW values across columns
 (e.g. "St-II: 1200002847(400MW)" in one column and "LTA: 0412100007(200MW),
 0412100020(200MW)" in another), the Application Quantum should be the TOTAL
 of ALL MW values: 400 + 200 + 200 = 800.
-Post-processing will handle this summation, so extract the MW from whichever
-column you see it in — preferably from the "App. No. & Quantum" column.
+Post-processing will handle this summation.
 
-Also check for "Planned additional capacity (MW)" or "Additional Generation
-Capacity" columns — these contain the additional capacity being applied for
-(e.g. "16 (BESS)", "28.75 (BESS)", "590 MW BESS", "52 MW (Solar)").
-Extract the numeric MW value from these as well."""
+CRITICAL — "Additional Generation Capacity" and "Planned additional capacity"
+columns do NOT map to Application Quantum. These columns contain the
+additional capacity breakdown (Solar/BESS/Wind MW) which maps to other
+CMETS columns like Battery Injection, Installed/Break-up Capacity Solar, etc.
+Do NOT use values from these columns for Application Quantum.
+
+Examples:
+  Row: "0212100033(300MW) | 52 MW (Solar)" → Application Quantum = 300
+  Row: "0412100008 (100MW) | 6.88 MW (BESS)" → Application Quantum = 100
+  Row: "1200001603 | LTA: 1200001669 (300MW) | 300 MW (BESS 4 Hr)"
+       → Application Quantum = 300 (from LTA column, NOT from BESS)"""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
 JSON_EXAMPLE = '"Application Quantum (MW)(ST II)": "300"'

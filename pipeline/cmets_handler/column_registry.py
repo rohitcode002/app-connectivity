@@ -219,12 +219,10 @@ COLUMN_DEFS: list[ColumnDef] = [
             "Existing connectivity App. no. & Quantum",
             "App. No. & Conn. Quantum (MW) of already granted Connectivity",
             "App. No. & Conn. Quantum (MW)",
-            "Planned additional capacity (MW)",
             "App. No. & Quantum (MW)",
-            "Additional Generation Capacity",
         ],
         norm_func="clean",
-        description="Applied connectivity quantum in MW",
+        description="Applied connectivity quantum in MW — comes from App No & Quantum column MW values, NOT from Additional Generation Capacity",
     ),
 
     # ── 16. Granted Quantum GNA/LTA(MW) ──────────────────────────────────

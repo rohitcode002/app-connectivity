@@ -26,24 +26,28 @@ Do NOT include any other words, sentences, or descriptions.
 Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)",
 "Solar (100) + BESS (50)", "Hydro (100) + BESS (25)", "PSP".
 
-IMPORTANT — Also look at "Planned additional capacity (MW)" or
-"Additional Generation Capacity" columns for component breakdowns:
-If such a column says "100 MW Solar & 125 MW BESS" or "Solar(30)+(56)BESS"
-or "16 (BESS)" or "240 MW Solar & 300 MW BESS", include ALL components and
-their MW values in the Type output. For example:
+CRITICAL — PRIMARY SOURCE for Type extraction:
+The Type is derived from the "Additional Generation Capacity" or
+"Planned additional capacity (MW)" columns. These columns specify
+WHAT TYPE of capacity is being added and how many MW.
+Do NOT confuse this with the "App. No. & Quantum (MW)" column which
+only shows the existing connectivity quantum (a bare MW number without type).
+
+Examples of Additional Generation Capacity → Type:
+  "52 MW (Solar)" → "Solar (52)"
+  "6.88 MW (BESS)" → "BESS (6.88)"
+  "300 MW (BESS 4 Hr)" → "BESS (300)"   (ignore duration, just extract type+MW)
+  "300 (BESS) 240 (Solar)" → "Solar (240) + BESS (300)"
+  "11.25 (BESS)" → "BESS (11.25)"
   "100 MW Solar & 125 MW BESS" → "Solar (100) + BESS (125)"
   "Solar(30)+(56)BESS" → "Solar (30) + BESS (56)"
   "16 (BESS)" → "BESS (16)"
-  "52 MW (Solar)" → "Solar (52)"
-  "6.88 MW (BESS)" → "BESS (6.88)"
-  "300 MW (BESS 4 Hr)" → "BESS (300)"
-  "300 (BESS) 240 (Solar)" → "Solar (240) + BESS (300)"
   "240 MW Solar & 300 MW BESS" → "Solar (240) + BESS (300)"
   "170 MW Wind & 150 MW BESS" → "Wind (170) + BESS (150)"
-  "11.25 (BESS)" → "BESS (11.25)"
+
 If the table has a dedicated "Type of Source" column, prefer it; otherwise
 derive the type from the "Planned additional capacity" or "Additional
 Generation Capacity" column values."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
-JSON_EXAMPLE = '"type": "Solar (300)"'
+JSON_EXAMPLE = '"type": "Solar (52)"'

@@ -1019,13 +1019,9 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         p["Battery Injection (MW)"] = clean(bat_inj or raw_bat_inj)
         p["Battery Drawl (MW)"]     = clean(bat_drw or raw_bat_drw)
 
-        # ── Battery MWh default: 0 when BESS present but no duration/MWh ─
-        # If BESS is in the type but MWh is still None, set to "0"
-        type_text = str(p.get("Type") or "")
-        if re.search(r"\bBESS\b", type_text, re.IGNORECASE):
-            if not clean(p["Battery MWh"]):
-                p["Battery MWh"] = "0"
-                print(f"      [Battery] BESS detected but no MWh/duration → MWh = 0")
+        # ── Battery MWh: stays null when no duration is mentioned ────────
+        # Battery MWh is ONLY computed when a duration (e.g. "4 Hr") is found.
+        # If BESS is present but no duration/MWh, Battery MWh remains null.
 
         # ── PSP overrides Battery Injection ───────────────────────────────
         # If PSP values are populated, battery injection is cleared because
