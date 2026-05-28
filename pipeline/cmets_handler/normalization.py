@@ -229,9 +229,30 @@ def norm_num_ids(v: Optional[str], strip_zeros: bool = False) -> Optional[str]:
     return (first.lstrip("0") or "0") if strip_zeros else first
 
 
+def norm_num_ids_multi(v: Optional[str], strip_zeros: bool = False) -> Optional[str]:
+    """Normalise numeric IDs — returns ALL matching IDs comma-separated.
+
+    Used for LTA Application ID which can have multiple IDs like:
+    'LTA: 0412100007(200MW), 0412100020(200MW)'
+    → '0412100007, 0412100020'
+    """
+    v = clean(v)
+    if not v:
+        return None
+    ids = re.findall(r"\b\d{6,}\b", v)
+    if not ids:
+        return v
+    if strip_zeros:
+        ids = [(i.lstrip("0") or "0") for i in ids]
+    return ", ".join(ids)
+
+
 def norm_num_ids_strip(v: Optional[str]) -> Optional[str]:
-    """Normalise numeric IDs with leading-zero stripping (for LTA IDs)."""
-    return norm_num_ids(v, strip_zeros=True)
+    """Normalise numeric IDs with leading-zero stripping (for LTA IDs).
+
+    Returns ALL matching LTA IDs comma-separated.
+    """
+    return norm_num_ids_multi(v, strip_zeros=True)
 
 
 # ── extract_ids ──────────────────────────────────────────────────────────────
@@ -239,6 +260,84 @@ def extract_ids(v: Optional[str]) -> list[str]:
     """Extract all 6+ digit IDs from a string."""
     v = clean(v)
     return re.findall(r"\b\d{6,}\b", v) if v else []
+
+
+# ── Application Quantum: sum MW from all app-ID columns ──────────────────────
+
+# Pattern 1: Explicit MW keyword inside parens: "(100MW)", "(100 MW)", "(150 MW)"
+_MW_EXPLICIT_RE = re.compile(
+    r"\(\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*MW\s*\)",
+    re.IGNORECASE,
+)
+# Pattern 2: Bare number in parens right after an app ID: "0412100008(100)", "ID (150)"
+# Must be preceded by a digit (end of app ID) and the paren content must be ONLY a number.
+# This avoids matching dates like "(06-11-2025)".
+_MW_BARE_PARENS_RE = re.compile(
+    r"(\d)\s*\(\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*\)",
+)
+
+
+def _extract_mw_from_id_cell(cell: Optional[str]) -> list[float]:
+    """Extract MW values from cells like '0412100008(100MW)', '1200001603(300 MW)'.
+
+    Uses two patterns:
+    1. Explicit MW: "(100MW)", "(300 MW)"
+    2. Bare number after app ID: "0412100008(100)" — requires digit before '('
+
+    Returns all MW values found in the cell.
+    """
+    text = clean(cell)
+    if not text:
+        return []
+    values: list[float] = []
+    seen_positions: set[int] = set()
+
+    # Pattern 1: Explicit MW keyword
+    for m in _MW_EXPLICIT_RE.finditer(text):
+        try:
+            values.append(float(m.group(1).replace(",", "")))
+            seen_positions.add(m.start())
+        except (ValueError, TypeError):
+            pass
+
+    # Pattern 2: Bare parens after app ID digit (skip already matched)
+    for m in _MW_BARE_PARENS_RE.finditer(text):
+        if m.start() not in seen_positions:
+            try:
+                values.append(float(m.group(2).replace(",", "")))
+            except (ValueError, TypeError):
+                pass
+
+    return values
+
+
+def compute_quantum_sum(
+    raw_gna: Optional[str],
+    raw_lta: Optional[str],
+    raw_quantum: Optional[str],
+) -> Optional[str]:
+    """Compute Application Quantum by summing MW values across all app-ID columns.
+
+    When the PDF table uses combined columns like "App. No. & Quantum (MW)",
+    the LLM may extract each ID + its MW in the same cell. This function sums
+    the MW values from GNA/ST-II and LTA columns to get the total quantum.
+
+    Examples:
+      ST-II: 1200002847(400MW) + LTA: 0412100007(200MW), 0412100020(200MW)
+      → 400 + 200 + 200 = 800
+
+    Falls back to the raw_quantum value if no MW values are found in the ID cells.
+    """
+    mw_values: list[float] = []
+    mw_values.extend(_extract_mw_from_id_cell(raw_gna))
+    mw_values.extend(_extract_mw_from_id_cell(raw_lta))
+
+    if mw_values:
+        total = sum(mw_values)
+        return str(int(total)) if total == int(total) else str(total)
+
+    # Fallback: use the raw quantum value as-is
+    return clean(raw_quantum)
 
 
 def _is_lta(v: str) -> bool:
@@ -523,12 +622,21 @@ def parse_type_capacity(v: Optional[str]) -> dict[str, float]:
     for match in trailing.finditer(text):
         add(match.group(2), match.group(1))
 
-    # Legacy compact fallback: "100(Solar)".
+    # Legacy compact fallback: "100(Solar)", "300 (BESS)".
     legacy = re.compile(
         rf"{_NUMBER_RE}\s*\(\s*({label_pat})\s*\)",
         re.IGNORECASE,
     )
     for match in legacy.finditer(text):
+        add(match.group(2), match.group(1))
+
+    # BESS with duration: "300 (BESS 4 Hr)", "300 MW (BESS 4hr)", "300(BESS 2 hours)"
+    # Extract the MW value for BESS, ignoring the duration inside parens.
+    bess_duration = re.compile(
+        rf"{_NUMBER_RE}\s*(?:MW\s*)?\(\s*(BESS)\s+\d+\s*(?:hours?|hrs?|Hr)\s*\)",
+        re.IGNORECASE,
+    )
+    for match in bess_duration.finditer(text):
         add(match.group(2), match.group(1))
 
     return buckets
@@ -695,6 +803,7 @@ NORM_FUNCTIONS: dict[str, callable] = {
     "extract_state":         extract_state,
     "norm_num_ids":          norm_num_ids,
     "norm_num_ids_strip":    norm_num_ids_strip,
+    "norm_num_ids_multi":    norm_num_ids_multi,
     "derive_enhancement_id": derive_enhancement_id,
     "extract_date":          extract_date,
     "gna_yes_no":            gna_yes_no,
@@ -819,13 +928,17 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         p["Project Location"]            = clean(p.get("Project Location"))
         p["Name of Developers"]          = norm_dev(p.get("Name of Developers"))
         p["GNA/ST II Application ID"]    = norm_num_ids(raw_gna, strip_zeros=False)
-        p["Application Quantum (MW)(ST II)"] = clean(p.get("Application Quantum (MW)(ST II)"))
+
+        # ── Application Quantum: sum MW from ID columns if available ──────
+        raw_quantum = p.get("Application Quantum (MW)(ST II)")
+        computed_quantum = compute_quantum_sum(raw_gna, raw_lta, raw_quantum)
+        p["Application Quantum (MW)(ST II)"] = computed_quantum if computed_quantum else clean(raw_quantum)
         p["Mode(Criteria for applying)"] = norm_mode_criteria(p.get("Mode(Criteria for applying)"))
         p["Nature of Applicant"]         = clean(p.get("Nature of Applicant"))
 
         # ── Primary key check after normalisation ─────────────────────────
         has_gna = bool(clean(p["GNA/ST II Application ID"]))
-        p["LTA Application ID"]          = norm_num_ids(raw_lta, strip_zeros=True)
+        p["LTA Application ID"]          = norm_num_ids_multi(raw_lta, strip_zeros=True)
         has_lta = bool(clean(p["LTA Application ID"]))
         p["Application ID under Enhancement 5.2 or revision"] = derive_enhancement_id(
             raw_enh, raw_gna, raw_lta, raw_mode
@@ -905,6 +1018,14 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         p["Battery MWh"]            = clean(bat_mwh or raw_bat_mwh)
         p["Battery Injection (MW)"] = clean(bat_inj or raw_bat_inj)
         p["Battery Drawl (MW)"]     = clean(bat_drw or raw_bat_drw)
+
+        # ── Battery MWh default: 0 when BESS present but no duration/MWh ─
+        # If BESS is in the type but MWh is still None, set to "0"
+        type_text = str(p.get("Type") or "")
+        if re.search(r"\bBESS\b", type_text, re.IGNORECASE):
+            if not clean(p["Battery MWh"]):
+                p["Battery MWh"] = "0"
+                print(f"      [Battery] BESS detected but no MWh/duration → MWh = 0")
 
         # ── PSP overrides Battery Injection ───────────────────────────────
         # If PSP values are populated, battery injection is cleared because

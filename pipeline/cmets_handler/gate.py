@@ -110,6 +110,17 @@ TARGET_COLUMN_VARIANTS: dict[str, list[list[str]]] = {
         [r"\bConnectivity\b", r"\bQuantum\b", r"\bMW\b"],
         [r"\bApplication\b", r"\bQuantum\b", r"\bMW\b"],
         [r"\bCapacity\b", r"\bMW\b"],
+        [r"\bAdditional\b", r"\bGeneration\b", r"\bCapacity\b"],
+        [r"\bPlanned\b", r"\badditional\b", r"\bcapacity\b"],
+        [r"\bExisting\b", r"\bconnectivity\b", r"\bQuantum\b"],
+        [r"\bApp\b", r"\bNo\b", r"\bQuantum\b", r"\bMW\b"],
+    ],
+
+    "Battery Drawl (MW)": [
+        [r"\bAdditional\b", r"\bDrawl\b", r"\bRequested\b"],
+        [r"\bAdditional\b", r"\bDrawl\b", r"\bMW\b"],
+        [r"\bBattery\b", r"\bDrawl\b"],
+        [r"\bBESS\b", r"\bDrawl\b"],
     ],
 
     "Nature of Applicant": [

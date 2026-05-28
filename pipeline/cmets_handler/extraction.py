@@ -43,10 +43,33 @@ _APPLICATIONS_UNDER_52_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Also detect "under regulation 5.2 of GNA Regulations" in description text
+_REGULATION_52_RE = re.compile(
+    r"\bunder\s+regulation\s+5\.?\s*2\b",
+    re.IGNORECASE,
+)
+
+# Also detect "Applications under 5.2" without "received"
+_UNDER_52_SHORT_RE = re.compile(
+    r"\bApplications?\s+under\s+5\.?\s*2\b",
+    re.IGNORECASE,
+)
+
 
 def _page_has_applications_under_52(page_text: str) -> bool:
-    """Return True for CMETS tables headed 'Applications under 5.2 received'."""
-    return bool(_APPLICATIONS_UNDER_52_RE.search(page_text or ""))
+    """Return True for CMETS tables with 5.2/regulation 5.2 context.
+
+    Detects:
+      - 'Applications under 5.2 received' (section heading)
+      - 'under regulation 5.2 of GNA Regulations' (description text)
+      - 'Applications under 5.2' (shorter variant)
+    """
+    text = page_text or ""
+    return bool(
+        _APPLICATIONS_UNDER_52_RE.search(text)
+        or _REGULATION_52_RE.search(text)
+        or _UNDER_52_SHORT_RE.search(text)
+    )
 
 
 def _extract_numeric_ids(value: object) -> list[str]:
@@ -67,22 +90,30 @@ def _dedup_preserve_order(values: list[str]) -> list[str]:
 
 
 def route_applications_under_52_rows(raw_rows: list[dict], page_text: str) -> list[dict]:
-    """Move Application No. IDs into the 5.2 column for 5.2-received pages.
+    """Move Application No. IDs into the correct columns for 5.2-received pages.
 
-    Some CMETS PDFs use the normal "Application No. & Date" table header under
-    a section titled "Applications under 5.2 received". On those pages, the
-    application number is an Enhancement 5.2/revision ID, not a GNA/ST-II ID.
+    On 5.2 pages, the "Application No. & Date" column contains the Enhancement
+    5.2 ID (usually 22-prefix), while ST-II and LTA IDs may appear in their
+    respective columns.  This function ensures:
+      - 22-prefix IDs → Enhancement 5.2 column
+      - 12/11-prefix IDs → GNA/ST II column
+      - 04/41-prefix IDs → LTA column
+
+    Also handles cases where IDs from "Application No. & Date" column were
+    incorrectly placed in GNA/ST II by the LLM.
     """
     if not _page_has_applications_under_52(page_text):
         return raw_rows
 
     routed: list[dict] = []
+    # All keys where the LLM might put application IDs
     id_source_keys = (
         "Application ID under Enhancement 5.2 or revision",
         "GNA/ST II Application ID",
         "Application No. & Date",
         "Application No.\n& Date",
         "Application/Submission Date",
+        "LTA Application ID",
     )
 
     for row in raw_rows:
@@ -91,14 +122,40 @@ def route_applications_under_52_rows(raw_rows: list[dict], page_text: str) -> li
             continue
 
         patched = dict(row)
-        ids: list[str] = []
-        for key in id_source_keys:
-            ids.extend(_extract_numeric_ids(patched.get(key)))
-        ids = _dedup_preserve_order(ids)
 
-        if ids:
-            patched["Application ID under Enhancement 5.2 or revision"] = ", ".join(ids)
-            patched["GNA/ST II Application ID"] = None
+        # Collect ALL numeric IDs from all possible source keys
+        all_ids: list[str] = []
+        for key in id_source_keys:
+            all_ids.extend(_extract_numeric_ids(patched.get(key)))
+        all_ids = _dedup_preserve_order(all_ids)
+
+        if all_ids:
+            # Route IDs by prefix
+            enh_ids: list[str] = []     # 22-prefix → Enhancement 5.2
+            gna_ids: list[str] = []     # 12/11-prefix → GNA/ST II
+            lta_ids: list[str] = []     # 04/41-prefix → LTA
+
+            for app_id in all_ids:
+                if app_id.startswith("22"):
+                    enh_ids.append(app_id)
+                elif app_id.startswith(("12", "11")):
+                    gna_ids.append(app_id)
+                elif app_id.startswith(("04", "41")):
+                    lta_ids.append(app_id)
+                else:
+                    # Unknown prefix — put in enhancement as default for 5.2 pages
+                    enh_ids.append(app_id)
+
+            # Set the routed values
+            patched["Application ID under Enhancement 5.2 or revision"] = (
+                ", ".join(enh_ids) if enh_ids else None
+            )
+            patched["GNA/ST II Application ID"] = (
+                gna_ids[0] if gna_ids else None  # GNA takes first only
+            )
+            patched["LTA Application ID"] = (
+                ", ".join(lta_ids) if lta_ids else patched.get("LTA Application ID")
+            )
 
         routed.append(patched)
     return routed

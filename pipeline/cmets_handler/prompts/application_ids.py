@@ -46,17 +46,21 @@ GNA/ST II Application ID:
 
 LTA Application ID:
   IDs prefixed with 04/41, or preceded by "LTA:" keyword.
-  Extract only ONE single ID — the first LTA ID found.
+  Extract ALL LTA IDs found — if there are multiple, return them comma-separated.
+  Example: "LTA: 0412100007(200MW), 0412100020(200MW)" → "0412100007, 0412100020"
   Often found in "App. No. & Conn. Quantum (MW) of already granted Connectivity"
-  column — extract only the application number (e.g. from "0412100008(100 MW)"
-  extract "0412100008"), NOT the MW value.
+  column — extract only the application numbers (e.g. from "0412100008(100 MW)"
+  extract "0412100008"), NOT the MW values.
 
 Application ID under Enhancement 5.2 or revision:
   Use ONLY when table/row context mentions Enhancement 5.2 / regulation 5.2 / revision.
+  This includes section headings like "Applications under 5.2 received" AND
+  description text like "under regulation 5.2 of GNA Regulations".
   Extract only ONE single ID.
-  CRITICAL: if the page/section title contains "Applications under 5.2 received",
-  the first numeric ID from "Application No. & Date" / "Application ID" column
-  belongs here, NOT in "GNA/ST II Application ID".
+  CRITICAL: if the page/section title contains "Applications under 5.2 received"
+  or the description mentions "under regulation 5.2", the first numeric ID from
+  "Application No. & Date" / "Application ID" column belongs here,
+  NOT in "GNA/ST II Application ID".
 
 CRITICAL — NO DUPLICATE IDs:
   The SAME application ID must NEVER appear in more than one column.
@@ -66,7 +70,7 @@ CRITICAL — NO DUPLICATE IDs:
 # ── JSON example fragment ────────────────────────────────────────────────────
 JSON_EXAMPLE = [
     '"GNA/ST II Application ID": "1200003683"',
-    '"LTA Application ID": "0412100008"',
+    '"LTA Application ID": "0412100008, 0412100020"',
     '"Application ID under Enhancement 5.2 or revision": null',
 ]
 

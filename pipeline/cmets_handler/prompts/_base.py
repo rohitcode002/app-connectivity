@@ -70,6 +70,8 @@ SKIP RULES — DO NOT extract rows if:
 - Battery values: fill only when BESS / Battery wording is explicitly present.
   If a duration is found in the text (e.g. "4 hours", "four (4) hours") and
   Battery MWh is NOT explicitly stated, compute: Battery MWh = Battery Injection (MW) × duration_hours.
+  IMPORTANT: If BESS is present but NO duration is mentioned and MWh is NOT
+  explicitly stated, set Battery MWh to 0 (zero), NOT null.
 - "type" MUST use only these component labels: Solar, Wind, Hydro, BESS, PSP
   with associated MW values in parentheses if present.
   Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)", "BESS (50)", or null.

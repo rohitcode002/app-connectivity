@@ -19,6 +19,8 @@ VARIANTS = [
     "App. No. & Conn. Quantum (MW) of already granted Connectivity",
     "App. No. & Conn. Quantum (MW)",
     "Planned additional capacity (MW)",
+    "App. No. & Quantum (MW)",
+    "Additional Generation Capacity",
 ]
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
@@ -34,9 +36,18 @@ contains BOTH an application number AND a MW value together, for example:
 In such cases, extract ONLY the MW numeric value (e.g. "100", "150", "250")
 as the Application Quantum, NOT the full application number.
 
-Also check for "Planned additional capacity (MW)" columns — these contain
-the additional capacity being applied for (e.g. "16 (BESS)", "28.75 (BESS)",
-"590 MW BESS"). Extract the numeric MW value from these as well."""
+IMPORTANT — Multiple App IDs with MW values:
+When a row has MULTIPLE application IDs with MW values across columns
+(e.g. "St-II: 1200002847(400MW)" in one column and "LTA: 0412100007(200MW),
+0412100020(200MW)" in another), the Application Quantum should be the TOTAL
+of ALL MW values: 400 + 200 + 200 = 800.
+Post-processing will handle this summation, so extract the MW from whichever
+column you see it in — preferably from the "App. No. & Quantum" column.
+
+Also check for "Planned additional capacity (MW)" or "Additional Generation
+Capacity" columns — these contain the additional capacity being applied for
+(e.g. "16 (BESS)", "28.75 (BESS)", "590 MW BESS", "52 MW (Solar)").
+Extract the numeric MW value from these as well."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
 JSON_EXAMPLE = '"Application Quantum (MW)(ST II)": "300"'
