@@ -12,7 +12,7 @@ from typing import Optional
 
 from config import MODEL, load_runtime_config
 from llm_client import call_llm, extract_text_from_response
-from pipeline.shared_utils import parse_json
+from pipeline.shared_utils import parse_bess_duration_hours, parse_json, parse_type_capacity
 from pipeline.token_usage import record_llm_token_usage
 
 
@@ -149,6 +149,9 @@ def extract_battery_values(
     mwh = raw_mwh
     inj = raw_inj
     drw = raw_drw
+    type_bess_mw = parse_type_capacity(type_col).get("BESS", 0.0)
+    if (inj is None or clean(inj) is None) and type_bess_mw > 0:
+        inj = f"{type_bess_mw:g}"
 
     try:
         resp = call_llm(
@@ -191,7 +194,7 @@ def extract_battery_values(
                     pass
             # Regex fallback: parse duration from the combined text
             if duration is None:
-                duration = _parse_duration_hours(full_context)
+                duration = parse_bess_duration_hours(type_col) or _parse_duration_hours(full_context)
 
             inj_val = inj or raw_inj
             if duration and duration > 0 and inj_val and clean(inj_val):
@@ -208,7 +211,7 @@ def extract_battery_values(
 
     # ── Post-LLM duration formula (in case LLM call itself failed) ────────
     if mwh is None or clean(mwh) is None:
-        duration = _parse_duration_hours(full_context)
+        duration = parse_bess_duration_hours(type_col) or _parse_duration_hours(full_context)
         inj_val = inj or raw_inj
         if duration and duration > 0 and inj_val and clean(inj_val):
             try:
@@ -218,5 +221,16 @@ def extract_battery_values(
                       f"{clean(inj_val)} MW × {duration} h = {computed_mwh} MWh")
             except (ValueError, TypeError):
                 pass
+
+    # If Type explicitly carries a BESS duration, the duration formula is
+    # authoritative. This fixes cases where BESS MW was copied into MWh.
+    duration = parse_bess_duration_hours(type_col)
+    inj_val = inj or raw_inj
+    if duration > 0 and inj_val and clean(inj_val):
+        try:
+            computed_mwh = float(clean(inj_val)) * duration
+            mwh = str(computed_mwh)
+        except (ValueError, TypeError):
+            pass
 
     return mwh, inj, drw

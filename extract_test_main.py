@@ -32,7 +32,7 @@ import sys
 # CONFIGURATION — change only this block
 # =============================================================================
 
-PDF_PATH = "42.pdf"       # <- hardcoded PDF filename / path
+PDF_PATH = "46.pdf"       # <- hardcoded PDF filename / path
 CAMELOT_FLAVOR = "auto"     # 'auto' tries lattice then stream | 'lattice' | 'stream'
 
 # =============================================================================

@@ -1,0 +1,29 @@
+============================================================
+PAGE 9 — TABLE 1  (accuracy: 100.0, flavor: stream)
+============================================================
+|                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------- |
+| Minutes of 46th CMETS-NR meeting held on 10.04.2026                                                                                     |
+| drawl at one location to cater to peak hours. M/s Juniper vide mail 13.04.26 requested to allow drawl from the Grid for BESS            |
+| applications in line with provisions of GNA regulations and consider processing the same at the earliest. M/s Juniper also informed     |
+| that in case there would be a deviation from regulations, they would be constrained to accept the same under protest so that            |
+| applications are processed without further delay.                                                                                       |
+| iv) Purvah Green Power limited:                                                                                                         |
+| Purvah Green Power submitted that prohibiting grid drawl prevents the developers from meeting RTC tender conditions that allow          |
+| 5–10% grid drawl. Further, it was stated that relying purely on additional solar for charging of BESS is difficult as during lean solar |
+| generation periods like monsoons, drawl from the grid will be required. Allowing drawl under existing solar‑hour access does not        |
+| constrain optimum utilisation of the ISTS system, as BESS charging depends on its MW rating, energy capacity, and operating             |
+| cycle. For example, with 300 MW solar‑hour access and a 150 MW / 600 MWh BESS, the battery can be fully charged in about 2              |
+| hours, leaving 2–3 solar hours for full dispatch of solar power to the grid.                                                            |
+| Accordingly,  PGPL  disagreed  with  the  imposed  conditions  and  requested  CTUIL  to  engage  in  one  on  one  discussions  with   |
+| developers to appreciate the practical challenges.                                                                                      |
+| v)  Hinduja Renewables                                                                                                                  |
+| Hinduja Renewables submitted that these imposed conditions for restriction on drawl from grid or solar hour access are not in line      |
+| with the CERC Regulation and emphasized that the new procedure was not yet public or notified, and it requires more deliberation        |
+| between the developers to understand our business cases and developers needed more time to align their internal investment              |
+| cases with these changes.                                                                                                               |
+| vi) Serentica Renewables/Khidrat renewables                                                                                             |
+| Serentica Renewables during the meeting and vide email dated 16.04.2026 submitted that the proposed conditions are beyond               |
+| the extant regulatory framework and are not envisaged under the GNA & Connectivity Regulations, 2022. Such restrictions would           |
+| adversely impact deployment of BESS, particularly for C&I consumers seeking to enhance CUF through hybrid configurations.               |
+| Page 5 of 20                                                                                                                            |

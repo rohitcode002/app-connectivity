@@ -57,6 +57,7 @@ capacity in patterns like:
   • "150 MW BESS"       → Battery Injection (MW) = 150
   • "300 MW (BESS 4hr)" → Battery Injection (MW) = 300, duration = 4 hours
   • "300 MW (BESS 2 Hr)" → Battery Injection (MW) = 300, duration = 2 hours
+  • Type "BESS (300, 4hr)" → Battery Injection (MW) = 300, duration = 4 hours
   • "590 MW BESS"       → Battery Injection (MW) = 590
   • "300 (BESS) 240 (Solar)" → Battery Injection (MW) = 300 (only BESS part)
   • "100 MW Solar & 125 MW BESS" → Battery Injection (MW) = 125 (only BESS part)
@@ -65,10 +66,14 @@ IMPORTANT: Do NOT confuse the existing connectivity quantum (from "App. No. &
 Quantum" column) with Battery Injection. Battery Injection comes only from the
 additional/planned capacity column's BESS component.
 
+If the table does NOT have an Injection column, set Battery Injection (MW) to null.
+
 CRITICAL — Battery Drawl (MW):
 If the table has an "Additional Drawl Requested (MW)" or "Additional Drawl (MW)"
 column, extract the numeric MW value as Battery Drawl (MW).
 Example: "3 MW" → Battery Drawl (MW) = 3
+Do NOT derive Battery Drawl (MW) from the Additional Generation Capacity column.
+Keep the drawl value EXACTLY as written (do not add zeros or scale values).
 
 CRITICAL — Battery MWh:
   DURATION FORMULA: If a duration is found in the text such as "4 hours",

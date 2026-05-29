@@ -23,7 +23,6 @@ VARIANTS = {
         "GNA Application ID",
         "ST-II Application ID",
         "GNA/ST II Application ID",
-        "App. No. & Quantum (MW)",
     ],
     "LTA Application ID": [
         "App. No. & Conn. Quantum (MW) of already granted Connectivity",
@@ -49,6 +48,11 @@ GNA/ST II Application ID:
   If a cell contains multiple IDs, pick the FIRST GNA/ST-II ID.
   Example: "St-II:1200001603" → "1200001603"
   Example: "St-II: 1200002847(400MW)" → "1200002847"
+  CRITICAL: When the table includes "Application No. & Date" AND
+  "Existing Connectivity App. No. & Quantum", ALWAYS use the ID from
+  "Application No. & Date" for this field. Never use Existing Connectivity
+  IDs for the GNA/ST II Application ID.
+  Keep the numeric ID EXACTLY as printed (preserve leading zeros).
 
 LTA Application ID:
   IDs prefixed with 04/41, or preceded by "LTA:" keyword.
@@ -73,11 +77,16 @@ Application ID under Enhancement 5.2 or revision:
   Example: "2200002563 (06-11-2025)" → Enhancement 5.2 = "2200002563"
   Example: "2200002637 (02-12-2025)" → Enhancement 5.2 = "2200002637"
   Example: "2200002127 (05.06.2025)" → Enhancement 5.2 = "2200002127"
+  Keep the numeric ID EXACTLY as printed (preserve leading zeros).
 
 CRITICAL — NO DUPLICATE IDs:
   The SAME application ID must NEVER appear in more than one column.
   If an ID appears in GNA/ST II Application ID, do NOT repeat it in
-  LTA Application ID or Enhancement 5.2. Each column must hold a UNIQUE ID."""
+  LTA Application ID or Enhancement 5.2. Each column must hold a UNIQUE ID.
+
+FORMAT RULE:
+  Return all IDs as strings. Never convert them to numbers.
+  Preserve leading zeros exactly as they appear in the PDF."""
 
 # ── JSON example fragment ────────────────────────────────────────────────────
 JSON_EXAMPLE = [

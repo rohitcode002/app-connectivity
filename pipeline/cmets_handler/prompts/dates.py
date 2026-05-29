@@ -35,7 +35,8 @@ VARIANTS = {
 
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
-Extract date values only. For "Application No. & Date" extract only the date part.
+Extract date values only. For "Application No. & Date" extract ONLY the date part
+and ignore the application ID (the ID goes to GNA/ST II Application ID).
 If multiple dates appear for one field, the post-processor will keep the latest parsed date.
 "Date from which additional capacity is to be added" — only fill if explicitly present."""
 

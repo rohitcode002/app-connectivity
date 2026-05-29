@@ -76,7 +76,9 @@ SKIP RULES — DO NOT extract rows if:
   Only set Battery MWh to a computed value when duration is available.
 - "type" MUST use only these component labels: Solar, Wind, Hydro, BESS, PSP
   with associated MW values in parentheses if present.
-  Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)", "BESS (50)", or null.
+  For BESS only, preserve the associated hour duration inside the BESS
+  parentheses when present, e.g. "BESS (300, 4hr)".
+  Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)", "BESS (50, 4hr)", or null.
   Do NOT include any other words, sentences, or descriptions in the type field."""
 
 

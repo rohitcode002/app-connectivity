@@ -1,0 +1,32 @@
+============================================================
+PAGE 21 — TABLE 1  (accuracy: 100.0, flavor: stream)
+============================================================
+|                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Minutes of 46th CMETS-NR meeting held on 10.04.2026                                                                                              |
+| Provided  that  the  scheduled  date  of  commercial  operation  (SCOD)  shall  not  be  later  than  24  months  from  the  date  of  in-       |
+| principle grant of Connectivity by the Nodal Agency in case the additional capacity is REGS (with or without ESS) (except hydro                  |
+| generating station) or ESS (except PSP):                                                                                                         |
+| Provided  further  that  in  case  the  SCOD,  as  per  this  clause,  falls  before  the  firm  Start  date of  Connectivity  of  the  existing |
+| Connectivity Grantee, behind which additional capacity is sought to be added, SCOD shall be considered as ‘firm Start Date of                    |
+| Connectivity’ of the existing Connectivity Grantee.”                                                                                             |
+============================================================
+PAGE 21 — TABLE 2  (accuracy: 100.0, flavor: stream)
+============================================================
+|                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Provided  further  that  in  case  the  SCOD,  as  per  this  clause,  falls  before  the  firm  Start  date of  Connectivity  of  the  existing  |
+| Connectivity Grantee, behind which additional capacity is sought to be added, SCOD shall be considered as ‘firm Start Date of                     |
+| Connectivity’ of the existing Connectivity Grantee.”                                                                                              |
+| Accordingly, for applicants who have submitted SCoD for additional capacity beyond 24 months (Apr’28 or beyond), the SCoD shall be                |
+| aligned with 24 months from the date of in-principle grant or firm start date of connectivity, as applicable in line with 5.2(g).                 |
+| (b)  Applicable Conn BGs are to be submitted within one month of the issuance of in-principle intimation. Upon submission of Conn BGs, final      |
+| grant intimations shall be issued.                                                                                                                |
+| (c)  The existing connectivity grantee shall be responsible for compliance with the Grid Code and other regulations of the Central Commission     |
+| for the above additional generation capacity as ’Lead generator’ in terms of clause (y)(ii) of Regulation 2.1. Further, the existing connectivity |
+| grantee shall submit the technical connection data in relation to the above additional capacity for checking necessary compliances in a           |
+| timely manner, so as to provide sufficient time for ensuring necessary compliances.                                                               |
+| (d)  Upon fulfilment of necessary compliances as per Regulations, the additional capacity granted under 5.2 shall be considered for revision      |
+| of injection rights during non-solar hours of existing connectivity grantee in line with 5.11(b) of GNA Regulations.                              |
+| (e)  Balance ROFR applications under 5.2 & 5.11(a) received during the ROFR window shall be discussed in the subsequent CMETS-NR                  |
+| meeting.                                                                                                                                          |

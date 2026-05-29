@@ -326,6 +326,12 @@ def _backfill_nature_of_applicant(raw_rows: list[dict], page_text: str) -> list[
 # Add entries here for any column that should ONLY be extracted when its header
 # is detected on the page.
 CONDITIONAL_FIELDS: dict[str, list[str]] = {
+    # Only fill battery injection when the column exists.
+    "Battery Injection (MW)": ["Battery Injection (MW)"],
+    # Only fill battery drawl when a drawl column exists.
+    "Battery Drawl (MW)": ["Battery Drawl (MW)"],
+    # Only fill battery MWh when explicitly present (duration-based MWh is computed later).
+    "Battery MWh": ["Battery MWh"],
 }
 
 

@@ -22,9 +22,11 @@ RULE = """\
 Extract only component type/capacity breakups from the source cell/table.
 Use only these component labels: Solar, Wind, Hydro, BESS, PSP.
 Include the associated MW value in parentheses when present.
+For BESS only, also preserve the associated hour duration inside the
+BESS parentheses when present, using this format: BESS (<MW>, <hours>hr).
 Do NOT include any other words, sentences, or descriptions.
 Examples: "Solar (300)", "Wind (12) + BESS (19)", "Solar (250) + Wind (250)",
-"Solar (100) + BESS (50)", "Hydro (100) + BESS (25)", "PSP".
+"Solar (100) + BESS (50, 4hr)", "Hydro (100) + BESS (25, 2hr)", "PSP".
 
 CRITICAL — PRIMARY SOURCE for Type extraction:
 The Type is derived from the "Additional Generation Capacity" or
@@ -36,7 +38,8 @@ only shows the existing connectivity quantum (a bare MW number without type).
 Examples of Additional Generation Capacity → Type:
   "52 MW (Solar)" → "Solar (52)"
   "6.88 MW (BESS)" → "BESS (6.88)"
-  "300 MW (BESS 4 Hr)" → "BESS (300)"   (ignore duration, just extract type+MW)
+  "300 MW (BESS 4 Hr)" → "BESS (300, 4hr)"
+  "300 MW (BESS - 4hr)" → "BESS (300, 4hr)"
   "300 (BESS) 240 (Solar)" → "Solar (240) + BESS (300)"
   "11.25 (BESS)" → "BESS (11.25)"
   "100 MW Solar & 125 MW BESS" → "Solar (100) + BESS (125)"

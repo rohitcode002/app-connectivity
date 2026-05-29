@@ -123,6 +123,12 @@ TARGET_COLUMN_VARIANTS: dict[str, list[list[str]]] = {
         [r"\bBESS\b", r"\bDrawl\b"],
     ],
 
+    "Battery Injection (MW)": [
+        [r"\bBattery\b", r"\bInjection\b"],
+        [r"\bBESS\b", r"\bInjection\b"],
+        [r"\bInjection\b", r"\bMW\b"],
+    ],
+
     "Nature of Applicant": [
         [r"\bNature\b", r"\bApplicant\b"],
     ],

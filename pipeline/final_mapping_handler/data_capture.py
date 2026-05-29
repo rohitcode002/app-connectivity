@@ -34,6 +34,7 @@ from pipeline.shared_utils import (
     components_from_type_keywords,
     components_to_type,
     find_col,
+    parse_bess_duration_hours,
     parse_type_capacity,
     safe_float,
     safe_str,
@@ -667,6 +668,10 @@ def _resolve_install_breakdown(
 
 def _battery_duration_hours(row: pd.Series) -> float:
     """Return BESS duration hours from row text, or 0 when absent."""
+    type_duration = parse_bess_duration_hours(row.get("Type"))
+    if type_duration > 0:
+        return type_duration
+
     text = " ".join(safe_str(v) for v in row.values)
     if not re.search(r"\bbess\b", text, re.IGNORECASE):
         return 0.0
@@ -679,25 +684,113 @@ def _battery_duration_hours(row: pd.Series) -> float:
     return safe_float(match.group(1))
 
 
-def _resolve_battery_mwh(df: pd.DataFrame) -> pd.Series:
+def _battery_injection_from_type(
+    row: pd.Series,
+    idx: int,
+    cmets_rows_by_id: dict[str, dict] | None = None,
+    cmets_rows_by_position: list[dict] | None = None,
+) -> float:
+    type_col = find_col(pd.DataFrame(columns=row.index), "Type")
+    type_value = row.get(type_col) if type_col else row.get("Type")
+    value = parse_type_capacity(type_value).get("BESS", 0.0)
+    if value > 0:
+        return value
+
+    original_row = _original_cmets_row(
+        row,
+        idx,
+        cmets_rows_by_id or {},
+        cmets_rows_by_position or [],
+    )
+    if original_row:
+        return parse_type_capacity(original_row.get("Type")).get("BESS", 0.0)
+
+    return 0.0
+
+
+def _battery_duration_from_type(
+    row: pd.Series,
+    idx: int,
+    cmets_rows_by_id: dict[str, dict] | None = None,
+    cmets_rows_by_position: list[dict] | None = None,
+) -> float:
+    duration = parse_bess_duration_hours(row.get("Type"))
+    if duration > 0:
+        return duration
+
+    original_row = _original_cmets_row(
+        row,
+        idx,
+        cmets_rows_by_id or {},
+        cmets_rows_by_position or [],
+    )
+    if original_row:
+        return parse_bess_duration_hours(original_row.get("Type"))
+
+    return 0.0
+
+
+def _resolve_battery_injection(
+    df: pd.DataFrame,
+    cmets_rows_by_id: dict[str, dict] | None = None,
+    cmets_rows_by_position: list[dict] | None = None,
+) -> pd.Series:
+    inj_col = _find_source_col(df, ["Battery Injection (MW)"])
+    if inj_col:
+        result = df[inj_col].copy()
+    else:
+        result = pd.Series([None] * len(df), index=df.index)
+
+    for idx, row in df.iterrows():
+        if safe_float(result.at[idx]) > 0:
+            continue
+        injection = _battery_injection_from_type(
+            row,
+            idx,
+            cmets_rows_by_id,
+            cmets_rows_by_position,
+        )
+        if injection > 0:
+            result.at[idx] = injection
+
+    return result
+
+
+def _resolve_battery_mwh(
+    df: pd.DataFrame,
+    cmets_rows_by_id: dict[str, dict] | None = None,
+    cmets_rows_by_position: list[dict] | None = None,
+) -> pd.Series:
     """Keep Battery MWh only when BESS has an hour/duration phrase."""
     mwh_col = _find_source_col(df, ["Battery MWh"])
     inj_col = _find_source_col(df, ["Battery Injection (MW)"])
 
     result = pd.Series([None] * len(df), index=df.index)
     for idx, row in df.iterrows():
-        duration = _battery_duration_hours(row)
+        duration = _battery_duration_from_type(
+            row,
+            idx,
+            cmets_rows_by_id,
+            cmets_rows_by_position,
+        ) or _battery_duration_hours(row)
         if duration <= 0:
+            continue
+
+        injection = safe_float(row.get(inj_col)) if inj_col else 0.0
+        if injection <= 0:
+            injection = _battery_injection_from_type(
+                row,
+                idx,
+                cmets_rows_by_id,
+                cmets_rows_by_position,
+            )
+        if injection > 0:
+            result.at[idx] = injection * duration
             continue
 
         existing_mwh = safe_float(row.get(mwh_col)) if mwh_col else 0.0
         if existing_mwh > 0:
             result.at[idx] = existing_mwh
-            continue
-
-        injection = safe_float(row.get(inj_col)) if inj_col else 0.0
-        if injection > 0:
-            result.at[idx] = injection * duration
 
     return result
 
@@ -850,7 +943,20 @@ def generate_data_to_be_captured(
             continue
 
         if final_name == "Battery MWh":
-            output_data[final_name] = _resolve_battery_mwh(df)
+            output_data[final_name] = _resolve_battery_mwh(
+                df,
+                cmets_rows_by_id,
+                cmets_rows_by_position,
+            )
+            mapped_cols.append(final_name)
+            continue
+
+        if final_name == "Battery Injection (MW)":
+            output_data[final_name] = _resolve_battery_injection(
+                df,
+                cmets_rows_by_id,
+                cmets_rows_by_position,
+            )
             mapped_cols.append(final_name)
             continue
 

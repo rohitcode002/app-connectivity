@@ -571,6 +571,10 @@ _COMPONENT_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBER_RE = r"(\d+(?:,\d{3})*(?:\.\d+)?)"
+_DURATION_RE = re.compile(
+    r"\b(\d+(?:\.\d+)?)\s*[-\s]?(?:hours?|hrs?|hr|h)\b",
+    re.IGNORECASE,
+)
 
 
 def _component_label(raw: str) -> str | None:
@@ -583,6 +587,23 @@ def _capacity_value(raw: str) -> float:
         return float(raw.replace(",", ""))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _parse_bess_duration_hours(v: Optional[str]) -> float:
+    text = clean(v)
+    if not text or not re.search(r"\bbess\b|\bbattery\b", text, re.IGNORECASE):
+        return 0.0
+
+    bess_match = re.search(r"\bbess\b|\bbattery\b", text, re.IGNORECASE)
+    if bess_match:
+        start = max(0, bess_match.start() - 80)
+        end = min(len(text), bess_match.end() + 80)
+        match = _DURATION_RE.search(text[start:end])
+        if match:
+            return _capacity_value(match.group(1))
+
+    match = _DURATION_RE.search(text)
+    return _capacity_value(match.group(1)) if match else 0.0
 
 
 def parse_type_capacity(v: Optional[str]) -> dict[str, float]:
@@ -612,6 +633,11 @@ def parse_type_capacity(v: Optional[str]) -> dict[str, float]:
         re.IGNORECASE,
     )
     for match in explicit.finditer(text):
+        if (
+            _component_label(match.group(1)) == "BESS"
+            and re.match(r"\s*(?:hours?|hrs?|hr|h)\b", text[match.end():], re.IGNORECASE)
+        ):
+            continue
         add(match.group(1), match.group(2))
 
     # Trailing qualifier: "100 MW (Solar)".
@@ -630,10 +656,11 @@ def parse_type_capacity(v: Optional[str]) -> dict[str, float]:
     for match in legacy.finditer(text):
         add(match.group(2), match.group(1))
 
-    # BESS with duration: "300 (BESS 4 Hr)", "300 MW (BESS 4hr)", "300(BESS 2 hours)"
+    # BESS with duration: "300 (BESS 4 Hr)", "300 MW (BESS - 4hr)", "300(BESS 2 hours)"
     # Extract the MW value for BESS, ignoring the duration inside parens.
     bess_duration = re.compile(
-        rf"{_NUMBER_RE}\s*(?:MW\s*)?\(\s*(BESS)\s+\d+\s*(?:hours?|hrs?|Hr)\s*\)",
+        rf"{_NUMBER_RE}\s*(?:MW\s*)?\(\s*(BESS)\s*[-,]?\s*"
+        rf"\d+(?:\.\d+)?\s*(?:hours?|hrs?|hr|h)\s*\)",
         re.IGNORECASE,
     )
     for match in bess_duration.finditer(text):
@@ -708,7 +735,7 @@ def enrich_type_with_mw(row: dict) -> Optional[str]:
     preserved.  If only bare keywords (e.g. "Solar"), MW values are
     looked up from Application Quantum and capacity columns.
 
-    Output format: "Solar (52) + BESS (6.88)"
+    Output format: "Solar (52) + BESS (6.88, 4hr)"
     """
     raw_type = clean(row.get("Type"))
     if not raw_type:
@@ -716,6 +743,7 @@ def enrich_type_with_mw(row: dict) -> Optional[str]:
 
     # ── Step 1: Parse any MW values already in the Type string ───────────
     existing_buckets = parse_type_capacity(raw_type)
+    bess_duration = _parse_bess_duration_hours(raw_type)
 
     # ── Step 2: Detect component keywords present in the Type string ────
     keywords = _components_from_keywords(raw_type)
@@ -770,7 +798,10 @@ def enrich_type_with_mw(row: dict) -> Optional[str]:
         if mw and mw > 0:
             # Format: remove trailing .0 for whole numbers
             mw_str = f"{mw:g}"
-            parts.append(f"{comp} ({mw_str})")
+            if comp == "BESS" and bess_duration > 0:
+                parts.append(f"{comp} ({mw_str}, {bess_duration:g}hr)")
+            else:
+                parts.append(f"{comp} ({mw_str})")
         else:
             parts.append(comp)
 
@@ -880,6 +911,13 @@ def validate_rows(raw_rows: list[dict]) -> list[MappedRow]:
         # Remap LLM keys → final column names
         row = remap_llm_keys(row)
 
+        # Backfill Application ID from Application/Submission Date when present
+        if not _has_any_primary_key(row):
+            app_date = row.get("Application/Submission Date")
+            ids = extract_ids(app_date)
+            if ids:
+                row["GNA/ST II Application ID"] = ids[0]
+
         # Primary key check: need at least one ID
         if not _has_any_primary_key(row):
             continue
@@ -912,6 +950,13 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         raw_enh  = p.get("Application ID under Enhancement 5.2 or revision")
         raw_opd  = p.get("GNA Operationalization Date")
         raw_stat = p.get("Status of application(Withdrawn / granted. Revoked.)")
+        raw_app_date = p.get("Application/Submission Date")
+
+        if not clean(raw_gna):
+            app_ids = extract_ids(raw_app_date)
+            if app_ids:
+                raw_gna = app_ids[0]
+                p["GNA/ST II Application ID"] = raw_gna
 
         # ── PSP raw values ────────────────────────────────────────────────
         raw_psp_mwh = p.get("PSP MWh")
@@ -972,7 +1017,9 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
             continue
 
         # ── Date columns ─────────────────────────────────────────────────
-        p["Application/Submission Date"] = extract_date(p.get("Application/Submission Date"))
+        p["Application/Submission Date"] = extract_date(
+            f"{raw_app_date or ''} {raw_gna or ''}".strip()
+        )
         p["Applied Start of Connectivity sought by developer date"
           "( start date of connectivity as per the application)"] = extract_date(
             p.get("Applied Start of Connectivity sought by developer date"

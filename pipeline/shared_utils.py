@@ -107,6 +107,10 @@ _COMPONENT_LABEL_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBER_RE = r"(\d+(?:,\d{3})*(?:\.\d+)?)"
+_DURATION_RE = re.compile(
+    r"\b(\d+(?:\.\d+)?)\s*[-\s]?(?:hours?|hrs?|hr|h)\b",
+    re.IGNORECASE,
+)
 
 
 def _component_label(raw: str) -> str | None:
@@ -119,6 +123,25 @@ def _capacity_value(raw: str) -> float:
         return float(str(raw).replace(",", ""))
     except (TypeError, ValueError):
         return 0.0
+
+
+def parse_bess_duration_hours(v: Optional[str]) -> float:
+    """Return BESS duration hours from text such as ``BESS (300, 4hr)``."""
+    text = safe_str(v)
+    if not text or not re.search(r"\bbess\b|\bbattery\b", text, re.IGNORECASE):
+        return 0.0
+
+    bess_match = re.search(r"\bbess\b|\bbattery\b", text, re.IGNORECASE)
+    if bess_match:
+        start = max(0, bess_match.start() - 80)
+        end = min(len(text), bess_match.end() + 80)
+        nearby = text[start:end]
+        duration_match = _DURATION_RE.search(nearby)
+        if duration_match:
+            return _capacity_value(duration_match.group(1))
+
+    duration_match = _DURATION_RE.search(text)
+    return _capacity_value(duration_match.group(1)) if duration_match else 0.0
 
 
 def parse_type_capacity(v: Optional[str]) -> dict[str, float]:
@@ -148,12 +171,24 @@ def parse_type_capacity(v: Optional[str]) -> dict[str, float]:
         rf"{_NUMBER_RE}\s*\(\s*({label_pat})\s*\)",
         re.IGNORECASE,
     )
+    bess_duration = re.compile(
+        rf"{_NUMBER_RE}\s*(?:MW\s*)?\(\s*(BESS|battery)\s*[-,]?\s*"
+        rf"\d+(?:\.\d+)?\s*(?:hours?|hrs?|hr|h)\s*\)",
+        re.IGNORECASE,
+    )
 
     for match in explicit.finditer(text):
+        if (
+            _component_label(match.group(1)) == "BESS"
+            and re.match(r"\s*(?:hours?|hrs?|hr|h)\b", text[match.end():], re.IGNORECASE)
+        ):
+            continue
         add(match.group(1), match.group(2))
     for match in trailing.finditer(text):
         add(match.group(2), match.group(1))
     for match in legacy.finditer(text):
+        add(match.group(2), match.group(1))
+    for match in bess_duration.finditer(text):
         add(match.group(2), match.group(1))
 
     return buckets
