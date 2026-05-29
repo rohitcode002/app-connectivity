@@ -262,6 +262,16 @@ def extract_ids(v: Optional[str]) -> list[str]:
     return re.findall(r"\b\d{6,}\b", v) if v else []
 
 
+def _dedup_ids(ids: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for app_id in ids:
+        if app_id not in seen:
+            seen.add(app_id)
+            out.append(app_id)
+    return out
+
+
 # ── Application Quantum: sum MW from all app-ID columns ──────────────────────
 
 # Pattern 1: Explicit MW keyword inside parens: "(100MW)", "(100 MW)", "(150 MW)"
@@ -363,7 +373,7 @@ def derive_enhancement_id(enh, gna, lta, mode) -> Optional[str]:
     """Derive Enhancement 5.2 application ID from context fields."""
     explicit_enh_ids = extract_ids(enh)
     if explicit_enh_ids:
-        return _pick_gna(explicit_enh_ids, prefer_st2=True)
+        return next((app_id for app_id in explicit_enh_ids if not app_id.startswith("04")), None)
     if not _has_ctx(r"\b(5\.?2|regulation\s*5\.?2|enhancement|revision)\b", enh, gna, lta, mode):
         return None
     st2 = _has_ctx(r"\b(stage\s*ii|st\s*ii|gna/st\s*ii)\b", enh, gna, lta, mode)
@@ -951,6 +961,18 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         raw_opd  = p.get("GNA Operationalization Date")
         raw_stat = p.get("Status of application(Withdrawn / granted. Revoked.)")
         raw_app_date = p.get("Application/Submission Date")
+
+        enh_ids_for_lta = extract_ids(raw_enh)
+        enh_lta_ids = [app_id for app_id in enh_ids_for_lta if app_id.startswith("04")]
+        if enh_lta_ids:
+            existing_lta_ids = extract_ids(raw_lta)
+            raw_lta = ", ".join(_dedup_ids([*existing_lta_ids, *enh_lta_ids]))
+            raw_enh = ", ".join(
+                app_id for app_id in enh_ids_for_lta
+                if not app_id.startswith("04")
+            ) or None
+            p["LTA Application ID"] = raw_lta
+            p["Application ID under Enhancement 5.2 or revision"] = raw_enh
 
         if not clean(raw_gna) and not extract_ids(raw_enh):
             app_ids = extract_ids(raw_app_date)

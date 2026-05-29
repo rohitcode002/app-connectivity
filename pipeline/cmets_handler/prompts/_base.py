@@ -40,15 +40,19 @@ PRIMARY KEY RULE (CRITICAL):
 
 5.2 PAGE ROUTING RULE (CRITICAL):
   If the FULL PAGE TEXT contains the heading/phrase "Applications under 5.2 received",
-  treat the whole page as a 5.2 Enhancement page. For existing-connectivity
-  grantee tables, put the ID from "Application No. & Date" into
-  "Application ID under Enhancement 5.2 or revision"; put any "St-II:" ID from
-  "Existing Connectivity App. No. & Quantum" into "GNA/ST II Application ID";
-  put every "LTA:" ID from that existing-connectivity column into
-  "LTA Application ID". If the 5.2 section says the existing connectivity
-  applications are "under process", use the ID from "Application No. & Date" as
-  "GNA/ST II Application ID" and the existing connectivity application number as
-  "Application ID under Enhancement 5.2 or revision".
+  treat the page as 5.2 context, but do NOT automatically move
+  "Application No. & Date" into Enhancement. In existing-connectivity grantee
+  tables, "Application No. & Date" remains the default "GNA/ST II Application ID".
+  If "Existing Connectivity App. No. & Quantum" has a bare non-LTA numeric ID
+  such as "0212100033(300MW)", put that existing-connectivity ID in
+  "Application ID under Enhancement 5.2 or revision". Put every LTA/"04..." ID
+  from that existing-connectivity column into "LTA Application ID". Only when
+  the existing-connectivity cell explicitly labels an ID as "St-II:" or "GNA:"
+  should that labelled ID become "GNA/ST II Application ID" and the
+  "Application No. & Date" ID move to Enhancement. If the 5.2 section says the
+  existing connectivity applications are "under process", use the ID from
+  "Application No. & Date" as "GNA/ST II Application ID" and the existing
+  connectivity application number as "Application ID under Enhancement 5.2 or revision".
 
 SKIP RULES — DO NOT extract rows if:
   • "Nature of Applicant" is "Bulk consumer" or "Drawee entity" or

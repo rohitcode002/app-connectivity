@@ -140,9 +140,61 @@ def _extract_lta_ids(value: object) -> list[str]:
     return _extract_keyword_ids(value, r"\blta\s*:")
 
 
+def _extract_lta_prefix_ids(value: object) -> list[str]:
+    """Extract bare LTA IDs by prefix."""
+    return [
+        app_id for app_id in _extract_numeric_ids(value)
+        if app_id.startswith("04")
+    ]
+
+
 def _source_value(row: dict, keys: tuple[str, ...]) -> Optional[str]:
     parts = [str(row.get(key) or "").strip() for key in keys if row.get(key)]
     return " ".join(parts).strip() or None
+
+
+def _page_existing_conn_by_app_id(page_text: str) -> dict[str, str]:
+    """Map Application No. IDs to the Existing Connectivity cell from markdown tables."""
+    mapping: dict[str, str] = {}
+    header_app_idx: Optional[int] = None
+    header_existing_idx: Optional[int] = None
+
+    for line in (page_text or "").splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        normalized = [re.sub(r"\s+", " ", cell).lower() for cell in cells]
+
+        app_idx = next(
+            (
+                idx for idx, cell in enumerate(normalized)
+                if "application" in cell and "date" in cell
+            ),
+            None,
+        )
+        existing_idx = next(
+            (
+                idx for idx, cell in enumerate(normalized)
+                if "existing connectivity" in cell and "app" in cell
+            ),
+            None,
+        )
+        if app_idx is not None and existing_idx is not None:
+            header_app_idx = app_idx
+            header_existing_idx = existing_idx
+            continue
+
+        if header_app_idx is None or header_existing_idx is None:
+            continue
+        if max(header_app_idx, header_existing_idx) >= len(cells):
+            continue
+
+        app_id = _first_id(cells[header_app_idx])
+        existing_cell = cells[header_existing_idx]
+        if app_id and _extract_numeric_ids(existing_cell):
+            mapping[app_id] = existing_cell
+
+    return mapping
 
 
 _APP_NO_KEYS = (
@@ -157,6 +209,9 @@ _EXISTING_CONN_KEYS = (
     "Existing Connectivity App. No. & Quantum",
     "Existing Connectivity App.  No. & Quantum",
     "Existing Connectivity  App. No. & Quantum",
+    "Existing Connectivity App. No. & Quantum (MW)",
+    "Existing Connectivity App.  No. & Quantum (MW)",
+    "Existing Connectivity  App. No. & Quantum (MW)",
     "Existing Connectivity application No. & Date",
     "Existing Connectivity App No and Quantum (MW)",
     "App. No. & Quantum (MW)",
@@ -171,11 +226,13 @@ def route_application_id_rows(
 ) -> list[dict]:
     """Route the three application-ID columns using source columns and keywords.
 
-    On 5.2 existing-connectivity pages, "Application No. & Date" is the
-    enhancement application, while St-II/GNA and LTA IDs are taken from the
-    existing-connectivity cell by keyword. For 5.2 "under process" pages, the
-    current application remains the GNA/ST-II ID and the existing application is
-    the enhancement ID.
+    On 5.2 existing-connectivity pages, "Application No. & Date" remains the
+    default GNA/ST-II ID. Bare non-LTA IDs in the existing-connectivity cell are
+    routed to Enhancement 5.2/revision; LTA/04 IDs route to LTA. If the
+    existing-connectivity cell explicitly labels an ID as St-II/GNA, that
+    labelled ID becomes GNA/ST-II and the Application No. ID becomes
+    Enhancement. For 5.2 "under process" pages, the current application remains
+    the GNA/ST-II ID and the existing application is the enhancement ID.
 
     Without 5.2 context, St-II keywords win for GNA/ST-II, LTA keywords populate
     every LTA number, and the Application No. ID is kept as enhancement only in
@@ -183,6 +240,7 @@ def route_application_id_rows(
     """
     has_52 = _page_has_applications_under_52(page_text) if applications_under_52 is None else applications_under_52
     under_process_52 = has_52 and _page_has_under_process_52(page_text)
+    page_existing_by_app_id = _page_existing_conn_by_app_id(page_text)
 
     routed: list[dict] = []
     for row in raw_rows:
@@ -195,15 +253,27 @@ def route_application_id_rows(
         existing_text = _source_value(patched, _EXISTING_CONN_KEYS)
 
         app_no_id = _first_id(app_no_text)
+        if not app_no_id:
+            gna_candidate = _first_id(patched.get("GNA/ST II Application ID"))
+            if gna_candidate in page_existing_by_app_id:
+                app_no_id = gna_candidate
+                app_no_text = gna_candidate
+        if not existing_text and app_no_id:
+            existing_text = page_existing_by_app_id.get(app_no_id)
+
         existing_ids = _extract_numeric_ids(existing_text)
         existing_st2_ids = _extract_st2_ids(existing_text)
-        existing_lta_ids = _extract_lta_ids(existing_text)
+        existing_lta_ids = _dedup_preserve_order(
+            _extract_lta_ids(existing_text) + _extract_lta_prefix_ids(existing_text)
+        )
         has_bare_existing_id = bool(existing_ids and not existing_st2_ids and not existing_lta_ids)
         st2_ids = existing_st2_ids or _extract_st2_ids(patched.get("GNA/ST II Application ID"))
         lta_ids = (
             existing_lta_ids
             + _extract_lta_ids(patched.get("LTA Application ID"))
+            + _extract_lta_prefix_ids(patched.get("LTA Application ID"))
             + _extract_lta_ids(patched.get("GNA/ST II Application ID"))
+            + _extract_lta_prefix_ids(patched.get("GNA/ST II Application ID"))
         )
         lta_ids = _dedup_preserve_order(lta_ids)
 

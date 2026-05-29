@@ -58,8 +58,8 @@ LTA Application ID:
   Extract IDs associated with the "LTA:" keyword. The number after "LTA:" is an
   LTA ID. If the same LTA cell continues with more 6+ digit numbers before the
   next label/column, extract those numbers too.
-  CRITICAL: Do NOT classify a bare number as LTA only because it starts with
-  04/41. The "LTA:" label must be present for this column.
+  CRITICAL: Any application ID starting with "04" is LTA even if the "LTA:"
+  label is not printed.
   Extract ALL LTA IDs found in the row — if there are multiple, return them
   comma-separated.
   Example: "LTA: 0412100007(200MW), 0412100020(200MW)" → "0412100007, 0412100020"
@@ -75,18 +75,26 @@ Application ID under Enhancement 5.2 or revision:
   Fill this column when the page/section mentions wording such as
   "Applications under 5.2 received", "under regulation 5.2", Enhancement, or
   revision.
-  CRITICAL: if the page/section title contains "Applications under 5.2 received"
-  and the table is for existing connectivity grantees, the ID from
-  "Application No. & Date" belongs here.
+  CRITICAL: "Applications under 5.2 received" is context, not an automatic
+  column swap. In existing-connectivity grantee tables, the ID from
+  "Application No. & Date" remains the default GNA/ST-II ID unless the existing
+  connectivity cell explicitly contains a "St-II:" or "GNA:" labelled ID.
+  If the existing-connectivity cell has a bare non-LTA numeric ID, put that
+  bare existing-connectivity ID here.
   If the 5.2 wording says the existing connectivity applications are "under
   process", the existing connectivity application number belongs here, while the
   ID from "Application No. & Date" remains the default GNA/ST-II ID.
   If a row has "Application No. & Date" plus "Existing Connectivity App. No. &
-  Quantum" and the existing-connectivity cell has only a bare numeric ID with no
-  "St-II:" and no "LTA:" label, put the "Application No. & Date" ID in
-  GNA/ST-II, put the bare existing-connectivity ID here, and leave LTA empty.
-  Example: "2200002563 (06-11-2025)" → Enhancement 5.2 = "2200002563"
-  Example: "2200002637 (02-12-2025)" → Enhancement 5.2 = "2200002637"
+  Quantum" and the existing-connectivity cell has a bare numeric ID that does
+  NOT start with "04", put the "Application No. & Date" ID in GNA/ST-II, put
+  the bare existing-connectivity ID here, and leave LTA empty. If that bare ID
+  starts with "04", put it in LTA instead.
+  Example: Application No. "2200002621 (25-11-2025)" +
+  Existing Connectivity "0212100033(300MW)" →
+  GNA/ST-II = "2200002621", Enhancement 5.2 = "0212100033".
+  Example: Existing Connectivity "St-II: 1200002847(400MW)" with Application
+  No. "2200002563 (06-11-2025)" → GNA/ST-II = "1200002847",
+  Enhancement 5.2 = "2200002563".
   Example: "2200002127 (05.06.2025)" → Enhancement 5.2 = "2200002127"
   Special non-5.2 case: when there is no 5.2 wording but the row has three
   application IDs (Application No. & Date + St-II + LTA), put the
