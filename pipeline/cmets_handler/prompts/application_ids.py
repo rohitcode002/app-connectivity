@@ -58,6 +58,8 @@ LTA Application ID:
   Extract IDs associated with the "LTA:" keyword. The number after "LTA:" is an
   LTA ID. If the same LTA cell continues with more 6+ digit numbers before the
   next label/column, extract those numbers too.
+  CRITICAL: Do NOT classify a bare number as LTA only because it starts with
+  04/41. The "LTA:" label must be present for this column.
   Extract ALL LTA IDs found in the row — if there are multiple, return them
   comma-separated.
   Example: "LTA: 0412100007(200MW), 0412100020(200MW)" → "0412100007, 0412100020"
@@ -79,6 +81,10 @@ Application ID under Enhancement 5.2 or revision:
   If the 5.2 wording says the existing connectivity applications are "under
   process", the existing connectivity application number belongs here, while the
   ID from "Application No. & Date" remains the default GNA/ST-II ID.
+  If a row has "Application No. & Date" plus "Existing Connectivity App. No. &
+  Quantum" and the existing-connectivity cell has only a bare numeric ID with no
+  "St-II:" and no "LTA:" label, put the "Application No. & Date" ID in
+  GNA/ST-II, put the bare existing-connectivity ID here, and leave LTA empty.
   Example: "2200002563 (06-11-2025)" → Enhancement 5.2 = "2200002563"
   Example: "2200002637 (02-12-2025)" → Enhancement 5.2 = "2200002637"
   Example: "2200002127 (05.06.2025)" → Enhancement 5.2 = "2200002127"

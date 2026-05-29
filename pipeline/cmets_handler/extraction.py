@@ -196,9 +196,12 @@ def route_application_id_rows(
 
         app_no_id = _first_id(app_no_text)
         existing_ids = _extract_numeric_ids(existing_text)
-        st2_ids = _extract_st2_ids(existing_text) or _extract_st2_ids(patched.get("GNA/ST II Application ID"))
+        existing_st2_ids = _extract_st2_ids(existing_text)
+        existing_lta_ids = _extract_lta_ids(existing_text)
+        has_bare_existing_id = bool(existing_ids and not existing_st2_ids and not existing_lta_ids)
+        st2_ids = existing_st2_ids or _extract_st2_ids(patched.get("GNA/ST II Application ID"))
         lta_ids = (
-            _extract_lta_ids(existing_text)
+            existing_lta_ids
             + _extract_lta_ids(patched.get("LTA Application ID"))
             + _extract_lta_ids(patched.get("GNA/ST II Application ID"))
         )
@@ -226,7 +229,12 @@ def route_application_id_rows(
                 elif app_no_id:
                     patched["GNA/ST II Application ID"] = app_no_id
         else:
-            if st2_ids:
+            if has_bare_existing_id:
+                if app_no_id:
+                    patched["GNA/ST II Application ID"] = app_no_id
+                patched["Application ID under Enhancement 5.2 or revision"] = existing_ids[0]
+                patched["LTA Application ID"] = None
+            elif st2_ids:
                 patched["GNA/ST II Application ID"] = st2_ids[0]
             elif app_no_id:
                 patched["GNA/ST II Application ID"] = app_no_id
@@ -242,6 +250,8 @@ def route_application_id_rows(
 
         if lta_ids:
             patched["LTA Application ID"] = _join_ids(lta_ids)
+        elif has_bare_existing_id:
+            patched["LTA Application ID"] = None
 
         routed.append(patched)
     return routed
