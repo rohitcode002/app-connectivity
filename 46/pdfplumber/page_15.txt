@@ -1,0 +1,50 @@
+Minutes of 46th CMETS-NR meeting held on 10.04.2026
+Sl. Application Project Existing Connectivity Additional SCoD of additional
+Applicant Connectivity Granted at
+No. No. & Date Location App. No. & Quantum (MW) Generation Capacity capacity
+2200003044 Renew Solar (Shakti Five) Barmer Distt. 400 kV
+9 1200003496 (100MW) 5.6 MW (Solar) 30-06-2027
+(20-01-2026) Private Limited Rajasthan Fatehgarh-III PS (Sec-II)
+2200003043 Adani Renewable Energy Jaisalmer Distt. 220 kV
+10 1200002635 (600MW) 39 MW (Solar) 30-06-2026
+(20-01-2026) Holding Seventeen Limited Rajasthan Fatehgarh-III PS (Sec-I)
+2200003051 ACME Solar Holdings Bikaner Distt.
+11 1200003829 (300MW) 8.05 MW (BESS) 01-02-2026 220 kV Bikaner-II PS
+(21-01-2026) Limited Rajasthan
+2200003052 ACME Heergarh Powertech Jodhpur/Phalodi
+12 1200003505 (300 MW) 60 MW (BESS) 01-02-2026 220 kV Bhadla-II PS
+(21-01-2026) Private Limited Distt. Rajasthan
+2200003058 Project Nine Renewable Phalodi Distt.
+13 2200000037 (450MW) 25.2 MW (Solar) 31-12-2026 220 kV Bhadla-II PS
+(22-01-2026) Power Private Limited Rajasthan
+2200003071 Renew Solar (Shakti Six) Phalodi Distt.
+14 0312100004 (450MW) 25.2 MW (Solar) 30-06-2027 400 kV Bhadla-III PS
+(23-01-2026) Private Limited Rajasthan
+2200003072 Renew Solar (Shakti Six) Phalodi Distt.
+15 1200003848 (550MW) 30.8 MW (Solar) 30-06-2027 400 kV Bhadla-III PS
+(23-01-2026) Private Limited Rajasthan
+B. Applications under 5.2 received applicants whose connectivity applications are under process:
+It was informed that a total of 3 no. of applications for additional capacity under 5.2 are received from entities whose connectivity
+applications are still under process.
+Sl. Application No. Existing Connectivity App. Additional Generation SCoD of additional Applied for
+Applicant Project Location
+No. & Date No. & Quantum (MW) Capacity capacity Connectivity at
+2200002959 Balasore Solar Power Phalodi Distt.
+1 2200002174 (300MW) 300 MW (BESS) 31-03-2030 Bhadla-V PS
+(22-12-2025) Private Limited Rajasthan
+2200003056 Vannur Solar Power Balotra Distt.
+2 2200001940 (300MW) 300 MW (BESS) 30-06-2030 Barmer-IV PS
+(22-01-2026) Private Limited Rajasthan
+2200003079 Hinduja Renewables Barmer Distt.
+3 2200002093 (50MW) 50 MW (BESS) 31-03-2028 Barmer-I PS
+(27-01-2026) Energy Private Limited Rajasthan
+Sl. Application No. Existing Connectivity App. Additional Generation SCoD of additional Applied for
+Applicant Project Location
+No. & Date No. & Quantum (MW) Capacity capacity Connectivity at
+2200002959 Balasore Solar Power Phalodi Distt.
+1. 2200002174 (300MW) 300 MW (BESS) 31-03-2030 Bhadla-V PS
+(22-12-2025) Private Limited Rajasthan
+It was informed that the connectivity applications associated with above applications under 5.2(App. No. 2200002174) is not yet
+taken up for discussion and grant due to non-finalization of transmission scheme for evacuation of power from Bhadla complex.
+Upon finalization, the transmission scheme shall be taken up for approval by competent authority. Upon approval of transmission
+Page 11 of 20

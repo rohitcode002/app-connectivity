@@ -72,6 +72,23 @@ def _page_has_applications_under_52(page_text: str) -> bool:
     )
 
 
+def _page_has_under_process_52(page_text: str) -> bool:
+    """Return True for 5.2 pages where existing applications are under process."""
+    text = page_text or ""
+    return bool(
+        re.search(
+            r"\bApplications?\s+under\s+5\.?\s*2\b.{0,160}\bunder\s+process\b",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        or re.search(
+            r"\bunder\s+process\b.{0,160}\bApplications?\s+under\s+5\.?\s*2\b",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+    )
+
+
 def _extract_numeric_ids(value: object) -> list[str]:
     """Extract application-like numeric IDs from an LLM cell value."""
     if value is None:
@@ -89,76 +106,144 @@ def _dedup_preserve_order(values: list[str]) -> list[str]:
     return out
 
 
-def route_applications_under_52_rows(raw_rows: list[dict], page_text: str) -> list[dict]:
-    """Move Application No. IDs into the correct columns for 5.2-received pages.
+def _first_id(value: object) -> Optional[str]:
+    ids = _extract_numeric_ids(value)
+    return ids[0] if ids else None
 
-    On 5.2 pages, the "Application No. & Date" column contains the Enhancement
-    5.2 ID (usually 22-prefix), while ST-II and LTA IDs may appear in their
-    respective columns.  This function ensures:
-      - 22-prefix IDs → Enhancement 5.2 column
-      - 12/11-prefix IDs → GNA/ST II column
-      - 04/41-prefix IDs → LTA column
 
-    Also handles cases where IDs from "Application No. & Date" column were
-    incorrectly placed in GNA/ST II by the LLM.
+def _join_ids(values: list[str]) -> Optional[str]:
+    ids = _dedup_preserve_order(values)
+    return ", ".join(ids) if ids else None
+
+
+def _extract_keyword_ids(value: object, keyword_re: str) -> list[str]:
+    """Extract IDs associated with a keyword and its continued same-cell text."""
+    if value is None:
+        return []
+
+    text = str(value)
+    ids: list[str] = []
+    for match in re.finditer(keyword_re, text, re.IGNORECASE):
+        segment = text[match.end():]
+        next_label = re.search(r"\b(?:st\s*[- ]?\s*ii|gna|lta)\s*:", segment, re.IGNORECASE)
+        if next_label:
+            segment = segment[:next_label.start()]
+        ids.extend(_extract_numeric_ids(segment))
+    return _dedup_preserve_order(ids)
+
+
+def _extract_st2_ids(value: object) -> list[str]:
+    return _extract_keyword_ids(value, r"\b(?:st\s*[- ]?\s*ii|gna)\s*:")
+
+
+def _extract_lta_ids(value: object) -> list[str]:
+    return _extract_keyword_ids(value, r"\blta\s*:")
+
+
+def _source_value(row: dict, keys: tuple[str, ...]) -> Optional[str]:
+    parts = [str(row.get(key) or "").strip() for key in keys if row.get(key)]
+    return " ".join(parts).strip() or None
+
+
+_APP_NO_KEYS = (
+    "Application No. & Date",
+    "Application No.\n& Date",
+    "Application  No. & Date",
+    "Application ID",
+    "Application/Submission Date",
+)
+
+_EXISTING_CONN_KEYS = (
+    "Existing Connectivity App. No. & Quantum",
+    "Existing Connectivity App.  No. & Quantum",
+    "Existing Connectivity  App. No. & Quantum",
+    "Existing Connectivity application No. & Date",
+    "Existing Connectivity App No and Quantum (MW)",
+    "App. No. & Quantum (MW)",
+    "App. No. & Conn. Quantum (MW) of already granted Connectivity",
+)
+
+
+def route_application_id_rows(
+    raw_rows: list[dict],
+    page_text: str,
+    applications_under_52: Optional[bool] = None,
+) -> list[dict]:
+    """Route the three application-ID columns using source columns and keywords.
+
+    On 5.2 existing-connectivity pages, "Application No. & Date" is the
+    enhancement application, while St-II/GNA and LTA IDs are taken from the
+    existing-connectivity cell by keyword. For 5.2 "under process" pages, the
+    current application remains the GNA/ST-II ID and the existing application is
+    the enhancement ID.
+
+    Without 5.2 context, St-II keywords win for GNA/ST-II, LTA keywords populate
+    every LTA number, and the Application No. ID is kept as enhancement only in
+    the special three-ID revision-style rows.
     """
-    if not _page_has_applications_under_52(page_text):
-        return raw_rows
+    has_52 = _page_has_applications_under_52(page_text) if applications_under_52 is None else applications_under_52
+    under_process_52 = has_52 and _page_has_under_process_52(page_text)
 
     routed: list[dict] = []
-    # All keys where the LLM might put application IDs
-    id_source_keys = (
-        "Application ID under Enhancement 5.2 or revision",
-        "GNA/ST II Application ID",
-        "Application No. & Date",
-        "Application No.\n& Date",
-        "Application/Submission Date",
-        "LTA Application ID",
-    )
-
     for row in raw_rows:
         if not isinstance(row, dict):
             routed.append(row)
             continue
 
         patched = dict(row)
+        app_no_text = _source_value(patched, _APP_NO_KEYS)
+        existing_text = _source_value(patched, _EXISTING_CONN_KEYS)
 
-        # Collect ALL numeric IDs from all possible source keys
-        all_ids: list[str] = []
-        for key in id_source_keys:
-            all_ids.extend(_extract_numeric_ids(patched.get(key)))
-        all_ids = _dedup_preserve_order(all_ids)
+        app_no_id = _first_id(app_no_text)
+        existing_ids = _extract_numeric_ids(existing_text)
+        st2_ids = _extract_st2_ids(existing_text) or _extract_st2_ids(patched.get("GNA/ST II Application ID"))
+        lta_ids = (
+            _extract_lta_ids(existing_text)
+            + _extract_lta_ids(patched.get("LTA Application ID"))
+            + _extract_lta_ids(patched.get("GNA/ST II Application ID"))
+        )
+        lta_ids = _dedup_preserve_order(lta_ids)
 
-        if all_ids:
-            # Route IDs by prefix
-            enh_ids: list[str] = []     # 22-prefix → Enhancement 5.2
-            gna_ids: list[str] = []     # 12/11-prefix → GNA/ST II
-            lta_ids: list[str] = []     # 04/41-prefix → LTA
+        if has_52:
+            if under_process_52:
+                if app_no_id:
+                    patched["GNA/ST II Application ID"] = app_no_id
+                if existing_ids:
+                    patched["Application ID under Enhancement 5.2 or revision"] = existing_ids[0]
+            else:
+                if app_no_id:
+                    patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
+                if st2_ids:
+                    patched["GNA/ST II Application ID"] = st2_ids[0]
+                elif existing_ids:
+                    non_lta_existing = [app_id for app_id in existing_ids if app_id not in set(lta_ids)]
+                    if non_lta_existing:
+                        patched["GNA/ST II Application ID"] = non_lta_existing[0]
+        else:
+            if st2_ids:
+                patched["GNA/ST II Application ID"] = st2_ids[0]
+            elif app_no_id:
+                patched["GNA/ST II Application ID"] = app_no_id
 
-            for app_id in all_ids:
-                if app_id.startswith("22"):
-                    enh_ids.append(app_id)
-                elif app_id.startswith(("12", "11")):
-                    gna_ids.append(app_id)
-                elif app_id.startswith(("04", "41")):
-                    lta_ids.append(app_id)
-                else:
-                    # Unknown prefix — put in enhancement as default for 5.2 pages
-                    enh_ids.append(app_id)
-
-            # Set the routed values
-            patched["Application ID under Enhancement 5.2 or revision"] = (
-                ", ".join(enh_ids) if enh_ids else None
+            all_row_ids = _dedup_preserve_order(
+                _extract_numeric_ids(app_no_text)
+                + _extract_numeric_ids(existing_text)
+                + _extract_numeric_ids(patched.get("GNA/ST II Application ID"))
+                + _extract_numeric_ids(patched.get("LTA Application ID"))
             )
-            patched["GNA/ST II Application ID"] = (
-                gna_ids[0] if gna_ids else None  # GNA takes first only
-            )
-            patched["LTA Application ID"] = (
-                ", ".join(lta_ids) if lta_ids else patched.get("LTA Application ID")
-            )
+            if app_no_id and st2_ids and (lta_ids or len(all_row_ids) >= 3):
+                patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
+
+        if lta_ids:
+            patched["LTA Application ID"] = _join_ids(lta_ids)
 
         routed.append(patched)
     return routed
+
+
+def route_applications_under_52_rows(raw_rows: list[dict], page_text: str) -> list[dict]:
+    """Backward-compatible wrapper for older imports/tests."""
+    return route_application_id_rows(raw_rows, page_text)
 
 
 # ── Helper: build enriched page text with camelot tables ──────────────────────
@@ -428,12 +513,21 @@ def run_single_pdf(
     results:       list[PageResult] = []
     pages_passed  = 0
     pages_skipped = 0
+    applications_under_52_section = False
 
     for i in range(limit):
         pnum = i + 1
 
         # ── Step 1: Extract page with Camelot ─────────────────────────────
         table_text, table_count, flavor = _render_camelot_page(pdf_path, pnum)
+        native_text = reader.pages[i].extract_text() or ""
+        context_text = f"{native_text}\n{table_text}".strip()
+        if _page_has_applications_under_52(context_text):
+            applications_under_52_section = True
+        elif re.search(r"^\s*[A-Z]\.\s+", native_text, re.MULTILINE) and not re.search(
+            r"Applications?\s+under\s+5\.?\s*2", native_text, re.IGNORECASE
+        ):
+            applications_under_52_section = False
 
         # ── Step 2: Save .txt ─────────────────────────────────────────────
         saved_path = _save_camelot_page_text(pdf_path, pnum, table_text)
@@ -471,7 +565,7 @@ def run_single_pdf(
         # Post-process rows
         raw_rows = _blank_conditional_fields(raw_rows, active_fields)
         raw_rows = _backfill_nature_of_applicant(raw_rows, text)
-        raw_rows = route_applications_under_52_rows(raw_rows, text)
+        raw_rows = route_application_id_rows(raw_rows, context_text, applications_under_52_section)
         raw_rows   = dedup_dicts(raw_rows)
         validated  = validate_rows(raw_rows)
         normalized = normalize(validated)

@@ -1,0 +1,67 @@
+Minutes of 46th CMETS-NR meeting held on 10.04.2026
+Additional Additional SCoD of
+Sl. Application Project Existing Connectivity App. Additional Drawl Connectivity
+Applicant Generation Capacity Additional Conn BG Requirement
+No. No. & Date Location No. & Quantum Requested (MW) Granted at
+Capacity Owned by capacity
+Juna Renewable Bikaner • Conn BG-1 : Rs. 50 Lakh
+2200002704 150 MW 220 kV
+4 Energy Private Distt. 1200003233 (290MW) Self 08-12-2027 NIL • Conn BG-3: Rs. 2 lakh/MW
+(05-12-2025) (BESS 4 Hr) Bikaner-II PS
+Limited Rajasthan
+Bikaner • Conn BG-1 : Rs. 50 Lakh
+2200002710 MRS Buildvision 850 MW 400 kV
+5 Distt. 2200000098(1000MW) Self 30-06-2028 NIL • Conn BG-3: Rs. 2 lakh/MW
+(06-12-2025) Private Limited (BESS 4 Hr) Bikaner-III PS
+Rajasthan
+Renew Surya Jaisalmer St-II: 1200002628 220 kV • Conn BG-1 : Rs. 50 Lakh
+2200002792 23 MW
+6 Roshni Private Distt. LTA: 1200003269 Self 01-01-2026 NIL Fatehgarh-III • Conn BG-3: Rs. 2 lakh/MW
+(07-12-2025) (BESS 4 Hr)
+Limited Rajasthan (400MW) (Sec-I) PS
+Bikaner • Conn BG-1 : Rs. 50 Lakh
+2200002839 Shudh Solar Power 300 MW 220 kV
+7 Distt. 2200000306 (250MW) Self 17-05-2028 NIL • Conn BG-3: Rs. 2 lakh/MW
+(08-12-2025) Private Limited (BESS 4 Hr) Bikaner-IV PS
+Rajasthan
+ACME Cleantech Barmer • Conn BG-1 : Rs. 50 Lakh
+2200002853 400 MW 220 kV
+8 Solutions Private Distt. 2200000161 (400MW) Self 31-03-2028 NIL • Conn BG-3: Rs. 2 lakh/MW
+(08-12-2025) (BESS 4 Hr) Barmer-I PS
+Limited Rajasthan
+Nagaur • Conn BG-1 : Rs. 50 Lakh
+2200002867 Juniper Green 300 MW 220 kV
+9 Distt. 2200000879 (300MW) Self 31-03-2028 NIL • Conn BG-3: Rs. 2 lakh/MW
+(08-12-2025) Energy Limited (BESS 2 Hr) Merta-II PS
+Rajasthan
+Sprng Akshaya Jaisalmer 400 kV • Conn BG-1 : Rs. 50 Lakh
+2200002871 60 MW
+10 Urja Private Distt. 2200000065 (100MW) Self 29-02-2028 NIL Fatehgarh-III • Conn BG-3: Rs. 2 lakh/MW
+(08-12-2025) (BESS 4 Hr)
+Limited Rajasthan (Sec-II) PS
+Phalodi • Conn BG-1 : Rs. 50 Lakh
+2200002822 Juniper Green Beta 100 MW 220 kV
+11 Distt. LTA: 0412100013(100MW) Self 31-03-2028 NIL • Conn BG-3: Rs. 2 lakh/MW
+(08-12-2025) Private Limited (BESS 2 Hr) Bhadla-III PS
+Rajasthan
+Phalodi • Conn BG-1 : Rs. 50 Lakh
+2200002821 Juniper Green Beta 50 MW 220 kV
+12 Distt. LTA: 0412100027 (50MW) Self 31-03-2028 NIL • Conn BG-3: Rs. 2 lakh/MW
+(08-12-2025) Private Limited (BESS 2 Hr) Bhadla-III PS
+Rajasthan
+Aditya Birla Barmer 400 kV • Conn BG-1 : Rs. 50 Lakh
+2200002920 80 MW
+13 Renewables Distt. 2200000138 (390MW) Self 30-06-2028 NA Fatehgarh-III • Conn BG-3: Rs. 2 lakh/MW
+(08-12-2025) (Wind)
+Subsidiary Limited Rajasthan (Sec-II) PS
+Juniper Green Bikaner • Conn BG-1 : Rs. 50 Lakh
+2200002897 59 MW 220 kV
+14 Cosmic Private Distt. LTA: 041210000 (100MW) Self 31-03-2028 NIL • Conn BG-3: Rs. 2 lakh/MW
+(09-12-2025) (BESS 2 Hr) Bikaner-II PS
+Limited Rajasthan
+Barmer 400 kV • Conn BG-1 : Rs. 50 Lakh
+2200002925 ABREL (RJ) 60 MW
+15 Distt. 2200000140 (260MW) Self 30-06-2028 NA Fatehgarh-III • Conn BG-3: Rs. 2 lakh/MW
+(09-12-2025) Projects Limited (Wind)
+Rajasthan (Sec-II) PS
+Page 15 of 20

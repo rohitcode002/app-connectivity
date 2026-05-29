@@ -1,0 +1,25 @@
+Minutes of 46th CMETS-NR meeting held on 10.04.2026
+Minutes of 46th Consultation Meeting for Evolving Transmission Schemes in Northern Region held on
+10.04.2026
+Chief General Manager (Transmission Planning), CTUIL, welcomed all the participants. It was informed that the primary agenda of
+the meeting was deliberation on applications received under Regulation 5.2 (RoFR) pursuant to the 3rd Amendment to Connectivity
+& GNA Regulations, 2022. The list of participants is enclosed in Annexure-I.
+A. Processing of Applications Received for Transition under the 3rd Amendment:
+1. CTUIL informed the participants that:
+● 3rd amendment of Connectivity & GNA Regulations 2022 was notified by CERC vide Gazette dated 09.09.2025.
+● As per Reg. 5.11(b) of the GNA Regulations, entities which are REGS (with or without ESS) or RPPD, based on solar source,
+or RHGS with a combination of solar source with another source (with or without ESS), in respect of which:
+o in principle or final grant of Connectivity has been intimated, or
+o where GNA is effective,
+shall be converted into an entity with solar-hour access, with:
+o Injection-scheduling rights during solar hours corresponding to the Connectivity quantum, and
+o Injection-right during non-solar hours limited to:
+▪ the capacity from non-solar sources, and
+▪ in any case, not exceeding the overall Connectivity quantum.
+● In line with the above provisions, the list of existing entities granted in-principle and/or final Connectivity intimations, or where
+GNA was effective, along with:
+o solar hour access,
+o corresponding injection rights during solar and non-solar hours,
+o Margins for non-solar hour access
+were published in CTUIL website seeking observations and comments from stakeholders.
+Page 1 of 20

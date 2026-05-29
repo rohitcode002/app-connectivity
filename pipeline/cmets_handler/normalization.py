@@ -248,11 +248,11 @@ def norm_num_ids_multi(v: Optional[str], strip_zeros: bool = False) -> Optional[
 
 
 def norm_num_ids_strip(v: Optional[str]) -> Optional[str]:
-    """Normalise numeric IDs with leading-zero stripping (for LTA IDs).
+    """Normalise LTA numeric IDs while preserving printed leading zeros.
 
     Returns ALL matching LTA IDs comma-separated.
     """
-    return norm_num_ids_multi(v, strip_zeros=True)
+    return norm_num_ids_multi(v, strip_zeros=False)
 
 
 # ── extract_ids ──────────────────────────────────────────────────────────────
@@ -952,7 +952,7 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         raw_stat = p.get("Status of application(Withdrawn / granted. Revoked.)")
         raw_app_date = p.get("Application/Submission Date")
 
-        if not clean(raw_gna):
+        if not clean(raw_gna) and not extract_ids(raw_enh):
             app_ids = extract_ids(raw_app_date)
             if app_ids:
                 raw_gna = app_ids[0]
@@ -983,7 +983,7 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
 
         # ── Primary key check after normalisation ─────────────────────────
         has_gna = bool(clean(p["GNA/ST II Application ID"]))
-        p["LTA Application ID"]          = norm_num_ids_multi(raw_lta, strip_zeros=True)
+        p["LTA Application ID"]          = norm_num_ids_multi(raw_lta, strip_zeros=False)
         has_lta = bool(clean(p["LTA Application ID"]))
         p["Application ID under Enhancement 5.2 or revision"] = derive_enhancement_id(
             raw_enh, raw_gna, raw_lta, raw_mode

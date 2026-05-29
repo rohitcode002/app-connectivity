@@ -34,18 +34,21 @@ PRIMARY KEY RULE (CRITICAL):
     • "LTA Application ID"
     • "Application ID under Enhancement 5.2 or revision"
   If a row has NONE of these three IDs, DO NOT output it.
-  Each ID field must hold at most ONE single numeric ID — do NOT put
-  multiple comma-separated IDs in the same field. If a table cell shows
-  multiple IDs, pick the FIRST one for that field.
+  "GNA/ST II Application ID" and "Application ID under Enhancement 5.2 or revision"
+  must each hold at most ONE single numeric ID. "LTA Application ID" may hold
+  multiple comma-separated IDs when multiple LTA numbers are printed in the row.
 
 5.2 PAGE ROUTING RULE (CRITICAL):
   If the FULL PAGE TEXT contains the heading/phrase "Applications under 5.2 received",
-  treat the whole page as a 5.2 Enhancement page. For every extracted row on that
-  page, put the FIRST numeric application number from "Application No. & Date" or
-  "Application ID" into "Application ID under Enhancement 5.2 or revision" and
-  leave "GNA/ST II Application ID" null. If that exact 5.2 received phrase is
-  absent, extract the first normal GNA/ST-II application number into
-  "GNA/ST II Application ID".
+  treat the whole page as a 5.2 Enhancement page. For existing-connectivity
+  grantee tables, put the ID from "Application No. & Date" into
+  "Application ID under Enhancement 5.2 or revision"; put any "St-II:" ID from
+  "Existing Connectivity App. No. & Quantum" into "GNA/ST II Application ID";
+  put every "LTA:" ID from that existing-connectivity column into
+  "LTA Application ID". If the 5.2 section says the existing connectivity
+  applications are "under process", use the ID from "Application No. & Date" as
+  "GNA/ST II Application ID" and the existing connectivity application number as
+  "Application ID under Enhancement 5.2 or revision".
 
 SKIP RULES — DO NOT extract rows if:
   • "Nature of Applicant" is "Bulk consumer" or "Drawee entity" or

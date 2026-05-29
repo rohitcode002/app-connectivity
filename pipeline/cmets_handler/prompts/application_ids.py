@@ -42,21 +42,24 @@ VARIANTS = {
 # ── Extraction rule ──────────────────────────────────────────────────────────
 RULE = """\
 GNA/ST II Application ID:
-  10-digit IDs starting with 12/11, or preceded by "St-II:" / "GNA:" prefix.
+  Extract the ID preceded by "St-II:" / "ST-II:" / "GNA:" when that keyword is
+  present. The number immediately after that keyword is the GNA/ST-II ID.
   CRITICAL: extract only ONE single ID per row — the primary/first one seen.
   Do NOT put multiple comma-separated IDs in this field.
   If a cell contains multiple IDs, pick the FIRST GNA/ST-II ID.
   Example: "St-II:1200001603" → "1200001603"
   Example: "St-II: 1200002847(400MW)" → "1200002847"
-  CRITICAL: When the table includes "Application No. & Date" AND
-  "Existing Connectivity App. No. & Quantum", ALWAYS use the ID from
-  "Application No. & Date" for this field. Never use Existing Connectivity
-  IDs for the GNA/ST II Application ID.
+  If no St-II/GNA keyword is present, use the ID from "Application No. & Date"
+  as the default GNA/ST-II ID, except when that ID is explicitly routed to
+  "Application ID under Enhancement 5.2 or revision" by the 5.2 rules below.
   Keep the numeric ID EXACTLY as printed (preserve leading zeros).
 
 LTA Application ID:
-  IDs prefixed with 04/41, or preceded by "LTA:" keyword.
-  Extract ALL LTA IDs found — if there are multiple, return them comma-separated.
+  Extract IDs associated with the "LTA:" keyword. The number after "LTA:" is an
+  LTA ID. If the same LTA cell continues with more 6+ digit numbers before the
+  next label/column, extract those numbers too.
+  Extract ALL LTA IDs found in the row — if there are multiple, return them
+  comma-separated.
   Example: "LTA: 0412100007(200MW), 0412100020(200MW)" → "0412100007, 0412100020"
   Example: "LTA: 1200001669 (300MW)" → "1200001669"
   Often found in "App. No. & Conn. Quantum (MW) of already granted Connectivity"
@@ -66,17 +69,23 @@ LTA Application ID:
   multi-line cell, split them — St-II IDs go to GNA/ST II, LTA IDs go here.
 
 Application ID under Enhancement 5.2 or revision:
-  Use ONLY when table/row context mentions Enhancement 5.2 / regulation 5.2 / revision.
-  This includes section headings like "Applications under 5.2 received" AND
-  description text like "under regulation 5.2 of GNA Regulations".
-  Extract only ONE single ID — usually the 22-prefix ID from "Application No. & Date"
-  or "Existing Connectivity application No. & Date" column.
+  Extract only ONE single ID.
+  Fill this column when the page/section mentions wording such as
+  "Applications under 5.2 received", "under regulation 5.2", Enhancement, or
+  revision.
   CRITICAL: if the page/section title contains "Applications under 5.2 received"
-  or the description mentions "under regulation 5.2", the 22-prefix ID from
-  "Application No. & Date" column belongs here, NOT in "GNA/ST II Application ID".
+  and the table is for existing connectivity grantees, the ID from
+  "Application No. & Date" belongs here.
+  If the 5.2 wording says the existing connectivity applications are "under
+  process", the existing connectivity application number belongs here, while the
+  ID from "Application No. & Date" remains the default GNA/ST-II ID.
   Example: "2200002563 (06-11-2025)" → Enhancement 5.2 = "2200002563"
   Example: "2200002637 (02-12-2025)" → Enhancement 5.2 = "2200002637"
   Example: "2200002127 (05.06.2025)" → Enhancement 5.2 = "2200002127"
+  Special non-5.2 case: when there is no 5.2 wording but the row has three
+  application IDs (Application No. & Date + St-II + LTA), put the
+  "Application No. & Date" ID here, put the St-II number in GNA/ST-II, and put
+  the LTA number(s) in LTA.
   Keep the numeric ID EXACTLY as printed (preserve leading zeros).
 
 CRITICAL — NO DUPLICATE IDs:
@@ -94,4 +103,3 @@ JSON_EXAMPLE = [
     '"LTA Application ID": "0412100008, 0412100020"',
     '"Application ID under Enhancement 5.2 or revision": null',
 ]
-

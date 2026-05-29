@@ -1,0 +1,25 @@
+Minutes of 46th CMETS-NR meeting held on 10.04.2026
+batteries. ACME also highlighted that batteries are urgently required for grid support and curtailment mitigation, and that mandating
+the prior installation of RE capacity would delay BESS deployment.
+ACME submitted that they are in principle disagree with the restriction on grid drawl, however requested for grant of Connectivity
+and allow grid charging of BESS, at least on an interim basis, until commensurate RE capacity is installed.
+ii) Adani Green Energy Limited :
+AGEL submitted that the GNA Regulations do not impose any restrictions on BESS charging, and the CERC Regulations allow
+injection and drawal by BESS entities based on their business case. Mandating installation of additional RE for BESS charging
+under RoFR would require identification of nearby land, which may not be feasible for all developers and may not align with their
+commercial viability.
+M/s AGEL vide letter 15.04.26 and in meeting emphasized that the value of BESS lies in multi-cycle operation, with charging
+during surplus periods (including grid drawal) and discharging during peak demand. Prohibiting grid charging would eliminate the
+second operating cycle, making projects financially unviable and inconsistent with VGF guidelines, which envisage approximately
+1.5 cycles per day. It was further pointed out that although about 60 GW is available in DAM, only one-third is cleared. Non-solar
+hour access enables BESS to absorb surplus generation and supply during non-solar demand hours. Restricting grid drawl or
+solar-hour charging of co-located BESS would perpetuate curtailment rather than mitigate it.
+AGEL added that the source of BESS charging and discharging should be decided by developers based on their commercial and
+contractual commitments. Accordingly, AGEL expressed in-principle disagreement with the imposed conditions and requested
+CTUIL to reconsider them holistically with timely grant of connectivity approval to under construction BESS projects.
+iii) Juniper Green Energy Limited
+Juniper submitted that Connectivity applications should be processed as per existing GNA regulations, which allow BESS for
+drawl and suggested to process the applications while holding the restrictive conditions regarding drawl from Grid or existing solar
+hour access for further consultation and approval from the CERC. It was further pointed out that FDRE (Firm and Dispatchable
+Renewable Energy) projects permits the developer to install the RE at two different locations, installation at often require grid
+Page 4 of 20
