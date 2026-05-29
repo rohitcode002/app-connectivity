@@ -211,14 +211,20 @@ def route_application_id_rows(
                 if existing_ids:
                     patched["Application ID under Enhancement 5.2 or revision"] = existing_ids[0]
             else:
-                if app_no_id:
-                    patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
                 if st2_ids:
+                    if app_no_id:
+                        patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
                     patched["GNA/ST II Application ID"] = st2_ids[0]
                 elif existing_ids:
                     non_lta_existing = [app_id for app_id in existing_ids if app_id not in set(lta_ids)]
                     if non_lta_existing:
-                        patched["GNA/ST II Application ID"] = non_lta_existing[0]
+                        if app_no_id:
+                            patched["GNA/ST II Application ID"] = app_no_id
+                        patched["Application ID under Enhancement 5.2 or revision"] = non_lta_existing[0]
+                    elif app_no_id:
+                        patched["GNA/ST II Application ID"] = app_no_id
+                elif app_no_id:
+                    patched["GNA/ST II Application ID"] = app_no_id
         else:
             if st2_ids:
                 patched["GNA/ST II Application ID"] = st2_ids[0]
