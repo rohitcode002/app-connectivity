@@ -261,6 +261,12 @@ _INSTALL_BREAKDOWN_COLUMNS = {
     "Installed/Break-up Capacity (MW) Hydro": "Hydro",
 }
 
+_APPLICATION_ID_COLUMNS = [
+    "GNA/ST II Application ID",
+    "LTA Application ID",
+    "Application ID under Enhancement 5.2 or revision",
+]
+
 _DURATION_HOURS_RE = re.compile(
     r"\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|hr|hourse)\b",
     re.IGNORECASE,
@@ -550,9 +556,78 @@ def _resolve_granted_quantum(df: pd.DataFrame) -> pd.Series:
     return result
 
 
-def _resolve_install_breakdown(df: pd.DataFrame, final_name: str) -> pd.Series:
+def _ids_from_row(row: pd.Series) -> list[str]:
+    ids: list[str] = []
+    for col in _APPLICATION_ID_COLUMNS:
+        value = safe_str(row.get(col))
+        if not value:
+            continue
+        ids.extend(part for part in re.split(r"[,;\s]+", value) if part)
+    return ids
+
+
+def _load_original_cmets_rows(final_mapped_excel: Path) -> tuple[dict[str, dict], list[dict]]:
+    """Load original CMETS rows so DTBC can recover Type MW if mapping stripped it."""
+    cmets_excel = final_mapped_excel.parent / "01_cmets_extracted.xlsx"
+    if not cmets_excel.exists():
+        return {}, []
+
+    try:
+        cmets_df = pd.read_excel(cmets_excel, sheet_name=0, engine="openpyxl")
+    except Exception as exc:
+        logger.warning("Could not read CMETS fallback workbook %s: %s", cmets_excel, exc)
+        return {}, []
+
+    rows_by_id: dict[str, dict] = {}
+    rows_by_position = cmets_df.to_dict(orient="records")
+    for _, row in cmets_df.iterrows():
+        row_dict = row.to_dict()
+        for app_id in _ids_from_row(row):
+            rows_by_id.setdefault(app_id, row_dict)
+
+    return rows_by_id, rows_by_position
+
+
+def _original_cmets_row(
+    row: pd.Series,
+    idx: int,
+    rows_by_id: dict[str, dict],
+    rows_by_position: list[dict],
+) -> dict | None:
+    for app_id in _ids_from_row(row):
+        if app_id in rows_by_id:
+            return rows_by_id[app_id]
+
+    if 0 <= idx < len(rows_by_position):
+        return rows_by_position[idx]
+
+    return None
+
+
+def _capacity_from_type(type_value: Any, component: str) -> float:
+    capacities = parse_type_capacity(type_value)
+    value = capacities.get(component, 0.0)
+
+    # Hybrid can be written as Solar + Wind rather than Hybrid(...).
+    if component == "Hybrid" and value <= 0:
+        solar = capacities.get("Solar", 0.0)
+        wind = capacities.get("Wind", 0.0)
+        if solar > 0 and wind > 0:
+            value = solar + wind
+
+    return value
+
+
+def _resolve_install_breakdown(
+    df: pd.DataFrame,
+    final_name: str,
+    cmets_rows_by_id: dict[str, dict] | None = None,
+    cmets_rows_by_position: list[dict] | None = None,
+) -> pd.Series:
     """Resolve install breakdown from upstream value, then CMETS Type MW."""
     component = _INSTALL_BREAKDOWN_COLUMNS[final_name]
+    cmets_rows_by_id = cmets_rows_by_id or {}
+    cmets_rows_by_position = cmets_rows_by_position or []
     source_col = _find_source_col(
         df,
         [
@@ -567,15 +642,23 @@ def _resolve_install_breakdown(df: pd.DataFrame, final_name: str) -> pd.Series:
     else:
         result = pd.Series([None] * len(df), index=df.index)
 
-    if type_col is None:
-        return result
-
     for idx, row in df.iterrows():
         if safe_float(result.at[idx]) > 0:
             continue
 
-        capacities = parse_type_capacity(row.get(type_col))
-        type_value = capacities.get(component, 0.0)
+        type_value = _capacity_from_type(row.get(type_col), component) if type_col else 0.0
+        if type_value > 0:
+            result.at[idx] = type_value
+            continue
+
+        original_row = _original_cmets_row(
+            row,
+            idx,
+            cmets_rows_by_id,
+            cmets_rows_by_position,
+        )
+        if original_row:
+            type_value = _capacity_from_type(original_row.get("Type"), component)
         if type_value > 0:
             result.at[idx] = type_value
 
@@ -728,6 +811,9 @@ def generate_data_to_be_captured(
     df = pd.read_excel(final_mapped_excel, sheet_name=0, engine="openpyxl")
     print(f"\n[Step 4] Source rows loaded: {len(df)}")
     print(f"[Step 4] Source columns: {len(df.columns)}")
+    cmets_rows_by_id, cmets_rows_by_position = _load_original_cmets_rows(final_mapped_excel)
+    if cmets_rows_by_id or cmets_rows_by_position:
+        print(f"[Step 4] CMETS Type fallback rows: {len(cmets_rows_by_position)}")
 
     # ── Build the output DataFrame ────────────────────────────────────────
     output_data: dict[str, pd.Series] = {}
@@ -754,7 +840,12 @@ def generate_data_to_be_captured(
             continue
 
         if final_name in _INSTALL_BREAKDOWN_COLUMNS:
-            output_data[final_name] = _resolve_install_breakdown(df, final_name)
+            output_data[final_name] = _resolve_install_breakdown(
+                df,
+                final_name,
+                cmets_rows_by_id,
+                cmets_rows_by_position,
+            )
             mapped_cols.append(final_name)
             continue
 

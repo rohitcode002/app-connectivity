@@ -93,6 +93,7 @@ _COMPONENT_CANON: dict[str, str] = {
     "ess": "BESS",
     "battery": "BESS",
     "battery energy storage": "BESS",
+    "hybrid": "Hybrid",
     "hydro": "Hydro",
     "hydel": "Hydro",
     "psp": "PSP",
@@ -102,7 +103,7 @@ _COMPONENT_CANON: dict[str, str] = {
 
 _COMPONENT_LABEL_RE = re.compile(
     r"battery\s+energy\s+storage|pump(?:ed)?\s+storage|solar|wind|bess|ess|"
-    r"battery|hydro|hydel|psp",
+    r"battery|hybrid|hydro|hydel|psp",
     re.IGNORECASE,
 )
 _NUMBER_RE = r"(\d+(?:,\d{3})*(?:\.\d+)?)"
