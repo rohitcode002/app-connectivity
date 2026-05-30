@@ -287,6 +287,48 @@ def _merge_row_text(base_val: str, continuation_val: str) -> str:
     return f"{base}\n{cont}"
 
 
+def _normalize_bay_value(value: str) -> list[str]:
+    if not value:
+        return []
+    return re.findall(r"[A-Za-z]*\d+[A-Za-z]*", value)
+
+
+def _extract_bay_no(text: str) -> str:
+    """Extract bay number(s) from row text.
+
+    Rules:
+    - Prefer the value after "Main Bay" when present.
+    - Otherwise, capture bay numbers after "Bay", "Bay No", etc.
+    - If multiple bay numbers are listed, return them in order separated by semicolons.
+    """
+    if not text:
+        return ""
+
+    main_match = re.search(
+        r"\bmain\s*bay\b[^A-Za-z0-9]*"
+        r"(?P<val>[A-Za-z]*\d+[A-Za-z]*(?:\s*[,/]+\s*[A-Za-z]*\d+[A-Za-z]*)*)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if main_match:
+        values = _normalize_bay_value(main_match.group("val"))
+        if values:
+            return "; ".join(values)
+
+    bay_matches = re.findall(
+        r"\bbay(?:\s*no\.?|\s*no)?\s*[:\-]?\s*"
+        r"([A-Za-z]*\d+[A-Za-z]*(?:\s*[,/]+\s*[A-Za-z]*\d+[A-Za-z]*)*)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    for match in bay_matches:
+        values = _normalize_bay_value(match)
+        if values:
+            return "; ".join(values)
+
+    return ""
+
+
 def merge_continuation_rows(all_pages: list[dict]) -> list[dict]:
     """Merge continuation rows into their parent rows across pages.
 
@@ -312,6 +354,7 @@ def merge_continuation_rows(all_pages: list[dict]) -> list[dict]:
         "connectivity_quantum_mw",
         "schedule_as_per_current_jcc",
         "connectivity_start_date_under_gna",
+        "bayno",
     ]
 
     rows_to_remove: list[tuple[int, int]] = []  # (page_index, row_index) to remove
@@ -384,6 +427,16 @@ def recompute_row_fields(row: dict, runtime=None) -> dict:
 
     schedule_text = row.get("schedule_as_per_current_jcc", "")
     gna_text = row.get("connectivity_start_date_under_gna", "")
+    bay_text = "\n".join(
+        value for value in [
+            row.get("bayno", ""),
+            row.get("pooling_station", ""),
+            row.get("connectivity_applicant", ""),
+            row.get("schedule_as_per_current_jcc", ""),
+            row.get("connectivity_start_date_under_gna", ""),
+        ]
+        if value
+    )
 
     # Robust COD extraction
     total_cod, cod_found = calculate_total_cod(schedule_text, runtime=runtime)
@@ -404,6 +457,8 @@ def recompute_row_fields(row: dict, runtime=None) -> dict:
 
     # Build output row
     output = {col: row.get(col, "") for col in COLUMN_NAMES}
+    if not output.get("bayno"):
+        output["bayno"] = _extract_bay_no(bay_text)
     output["total_COD"] = total_cod if cod_found else ""
     output["COD_Found"] = cod_found
     output["effective_date"] = effective_date

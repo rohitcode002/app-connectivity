@@ -1050,6 +1050,13 @@ def run_layer4_excel(
     df["Matched JCC ID"] = matched_ids
     df["Bay No (JCC)"] = jcc_bay_values
 
+    if "Bay No" in df.columns:
+        bay_no_existing = df["Bay No"].fillna("").astype(str)
+        df["Bay No"] = [
+            existing if existing.strip() else jcc_val
+            for existing, jcc_val in zip(bay_no_existing, jcc_bay_values)
+        ]
+
     # ── Write Excel ───────────────────────────────────────────────────────
     print(f"\n  Layer 4 Results:")
     print(f"    Total CMETS rows          : {len(df)}")

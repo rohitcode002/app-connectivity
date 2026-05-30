@@ -60,6 +60,7 @@ For every page, the console prints whether the page was parsed, skipped, extract
 | **connectivity_quantum_mw** | JCC PDF table | Applied connectivity quantum in MW |
 | **schedule_as_per_current_jcc** | JCC PDF table | Current JCC schedule — contains MW values and dates |
 | **connectivity_start_date_under_gna** | JCC PDF table | GNA status text (e.g. "Effective" or "Connectivity likely to be operationalized...") |
+| **bayno** | JCC PDF table | Bay number(s) mentioned in the row (prefers Main Bay when present) |
 
 ### Derived JCC Logic
 

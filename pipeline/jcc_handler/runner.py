@@ -82,7 +82,7 @@ def _load_json(path: Path) -> dict:
 
 # Increment this version when postprocessing logic changes materially.
 # Stale caches without a matching version will be re-extracted.
-_POSTPROCESS_VERSION = 4
+_POSTPROCESS_VERSION = 5
 
 
 def _has_current_jcc_schema(data: dict) -> bool:
@@ -90,7 +90,7 @@ def _has_current_jcc_schema(data: dict) -> bool:
     AND were produced with the current postprocessing version."""
     if data.get("postprocess_version", 0) < _POSTPROCESS_VERSION:
         return False
-    required = {"total_COD", "COD_Found", "effective_date", "TGNA", "GNA"}
+    required = {"total_COD", "COD_Found", "effective_date", "TGNA", "GNA", "bayno"}
     saw_row = False
     for page in data.get("pages", []):
         for row in page.get("rows", []):

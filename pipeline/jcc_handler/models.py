@@ -55,6 +55,7 @@ COLUMN_NAMES = [
     "connectivity_quantum_mw",
     "schedule_as_per_current_jcc",
     "connectivity_start_date_under_gna",
+    "bayno",
 ]
 
 # Values computed after extraction from the schedule columns.

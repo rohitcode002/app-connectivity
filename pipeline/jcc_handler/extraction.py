@@ -47,7 +47,7 @@ Return only valid JSON. Do not include markdown.
 Extract one object per data row from the connectivity schedule table.
 Use exactly these keys:
 pooling_station, connectivity_applicant, connectivity_quantum_mw,
-schedule_as_per_current_jcc, connectivity_start_date_under_gna.
+schedule_as_per_current_jcc, connectivity_start_date_under_gna, bayno.
 
 Column meanings:
 - pooling_station is the table's Pooling Station column. Extract it with the same rule as CMETS Substation:
@@ -55,6 +55,9 @@ Column meanings:
   Do not include bay numbers, voltage, developer names, schedule text, or remarks.
 - schedule_as_per_current_jcc is "Under Grantee scope Gen Commissioning / Connectivity line schedule".
 - connectivity_start_date_under_gna is "Connectivity Start Date under GNA and Connectivity Effectiveness date".
+- bayno is the bay number mentioned anywhere in the same row (including ISTS/Transmission System columns).
+    If the text contains both Main Bay and Tie Bay, choose the Main Bay number. If multiple bay numbers are listed,
+    return them separated by semicolons in the order they appear (e.g., "A202; A203").
 - The schedule column may label the generation section as "RE generation", "Generation", or "Generation (MW)".
 
 Rules:
@@ -375,6 +378,10 @@ _LLM_KEY_ALIASES = {
     "Under Grantee scope Gen Commissioning /Connectivity line schedule": "schedule_as_per_current_jcc",
     "Under Grantee scope Gen Commissioning / Connectivity line schedule": "schedule_as_per_current_jcc",
     "Connectivity Start Date under GNA and Connectivity Effectiveness date": "connectivity_start_date_under_gna",
+    "Bay No": "bayno",
+    "Bay No.": "bayno",
+    "Bay no.": "bayno",
+    "Bay no": "bayno",
 }
 
 
