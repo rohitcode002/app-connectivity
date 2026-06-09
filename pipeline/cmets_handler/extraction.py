@@ -284,31 +284,39 @@ def route_application_id_rows(
                 if existing_ids:
                     patched["Application ID under Enhancement 5.2 or revision"] = existing_ids[0]
             else:
+                # On 5.2 pages: App No. is the 5.2 enhancement, Existing is the original GNA
                 if st2_ids:
+                    # Existing connectivity has St-II label
                     if app_no_id:
                         patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
                     patched["GNA/ST II Application ID"] = st2_ids[0]
-                elif existing_ids:
+                elif has_bare_existing_id:
+                    # Existing connectivity has bare unlabeled ID (non-LTA)
                     non_lta_existing = [app_id for app_id in existing_ids if app_id not in set(lta_ids)]
                     if non_lta_existing:
                         if app_no_id:
-                            patched["GNA/ST II Application ID"] = app_no_id
-                        patched["Application ID under Enhancement 5.2 or revision"] = non_lta_existing[0]
+                            patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
+                        patched["GNA/ST II Application ID"] = non_lta_existing[0]
                     elif app_no_id:
-                        patched["GNA/ST II Application ID"] = app_no_id
+                        patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
                 elif app_no_id:
-                    patched["GNA/ST II Application ID"] = app_no_id
+                    patched["Application ID under Enhancement 5.2 or revision"] = app_no_id
         else:
+            # Non-5.2 pages: DO NOT fill Enhancement 5.2 column unless explicitly labeled
             if has_bare_existing_id:
+                # Bare existing ID is treated as LTA, not as Enhancement 5.2
                 if app_no_id:
                     patched["GNA/ST II Application ID"] = app_no_id
-                patched["Application ID under Enhancement 5.2 or revision"] = existing_ids[0]
-                patched["LTA Application ID"] = None
+                # Treat bare existing ID as LTA
+                if not lta_ids:
+                    lta_ids = existing_ids
+                patched["Application ID under Enhancement 5.2 or revision"] = None
             elif st2_ids:
                 patched["GNA/ST II Application ID"] = st2_ids[0]
             elif app_no_id:
                 patched["GNA/ST II Application ID"] = app_no_id
 
+            # Only fill Enhancement 5.2 if it's a three-ID revision row with explicit labels
             all_row_ids = _dedup_preserve_order(
                 _extract_numeric_ids(app_no_text)
                 + _extract_numeric_ids(existing_text)
@@ -320,8 +328,6 @@ def route_application_id_rows(
 
         if lta_ids:
             patched["LTA Application ID"] = _join_ids(lta_ids)
-        elif has_bare_existing_id:
-            patched["LTA Application ID"] = None
 
         routed.append(patched)
     return routed
