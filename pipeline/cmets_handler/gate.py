@@ -28,6 +28,8 @@ BLOCKLIST_PATTERNS: list[str] = [
     r"\bStart\s+date\s+of\s+GNARE\b",
     r"\bEnd\s+date\s+of\s+GNARE\b",
     r"\bGNARE\b.*\bMW\b",
+    # Deletion of synchronous condenser — not a connectivity application
+    r"\bDeletion\s+of\s+synchronous\s+condenser\b",
 ]
 
 # Nature of Applicant values that indicate non-generator tables to skip

@@ -231,16 +231,16 @@ def _step1_effectiveness_mapping(
     eff_df = pd.read_excel(effectiveness_excel, sheet_name=0, engine="openpyxl")
     print(f"[Step 1] Effectiveness rows loaded: {len(eff_df)}")
 
-    # Build application_id → row dict lookup
-    eff_lookup: dict[str, dict] = {}
+    # Build effectiveness list (each row may have multiple IDs in application_id cell)
+    eff_records: list[dict] = []
     for _, eff_row in eff_df.iterrows():
-        app_id = safe_str(eff_row.get("application_id")).strip()
-        if app_id and app_id.lower() not in ("", "none", "nan", "null"):
-            eff_lookup[app_id] = eff_row.to_dict()
+        app_id_cell = safe_str(eff_row.get("application_id")).strip()
+        if app_id_cell and app_id_cell.lower() not in ("", "none", "nan", "null"):
+            eff_records.append(eff_row.to_dict())
 
-    print(f"[Step 1] Effectiveness lookup: {len(eff_lookup)} unique application IDs")
+    print(f"[Step 1] Effectiveness records loaded: {len(eff_records)}")
 
-    if not eff_lookup:
+    if not eff_records:
         print("[Step 1] WARNING: No effectiveness records with application_id.")
         cmets_df.to_excel(str(output_excel), index=False,
                           sheet_name="CMETS+Effectiveness")
@@ -270,28 +270,41 @@ def _step1_effectiveness_mapping(
         enh_ids = _extract_ids(row.get(
             "Application ID under Enhancement 5.2 or revision"))
 
-        # Search effectiveness lookup: GNA → LTA → 5.2 cascade
+        # Search effectiveness records: GNA → LTA → 5.2 cascade
+        # Use substring "in" matching since effectiveness application_id can contain multiple IDs
         eff_rec = None
         match_via = None
 
         for aid in gna_ids:
-            if aid in eff_lookup:
-                eff_rec = eff_lookup[aid]
-                match_via = "GNA"
+            for eff_row in eff_records:
+                eff_app_id_cell = safe_str(eff_row.get("application_id"))
+                if aid in eff_app_id_cell:
+                    eff_rec = eff_row
+                    match_via = "GNA"
+                    break
+            if eff_rec:
                 break
 
         if eff_rec is None:
             for aid in lta_ids:
-                if aid in eff_lookup:
-                    eff_rec = eff_lookup[aid]
-                    match_via = "LTA"
+                for eff_row in eff_records:
+                    eff_app_id_cell = safe_str(eff_row.get("application_id"))
+                    if aid in eff_app_id_cell:
+                        eff_rec = eff_row
+                        match_via = "LTA"
+                        break
+                if eff_rec:
                     break
 
         if eff_rec is None:
             for aid in enh_ids:
-                if aid in eff_lookup:
-                    eff_rec = eff_lookup[aid]
-                    match_via = "5.2"
+                for eff_row in eff_records:
+                    eff_app_id_cell = safe_str(eff_row.get("application_id"))
+                    if aid in eff_app_id_cell:
+                        eff_rec = eff_row
+                        match_via = "5.2"
+                        break
+                if eff_rec:
                     break
 
         if eff_rec is None:
