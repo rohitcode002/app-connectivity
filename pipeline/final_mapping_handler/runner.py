@@ -33,7 +33,12 @@ from typing import Optional
 import pandas as pd
 
 from pipeline.mapping_handler.formatting import format_mapped_excel
-from pipeline.shared_utils import safe_str
+from pipeline.shared_utils import (
+    safe_str,
+    components_from_type_keywords,
+    components_to_type,
+    parse_type_capacity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +93,59 @@ _TYPE_MW_RE = re.compile(
     r"\s*\(\s*([\d,.]+)\s*\)",
     re.IGNORECASE,
 )
+
+
+def _parse_eff_gna_lta(app_id_text: str) -> tuple[str | None, str | None]:
+    """Extract GNA (St-II) and LTA IDs from an effectiveness application_id.
+
+    Examples:
+        'St-II:1200003740 (100 MW) LTA: 0412100008 (100 MW)'
+          → ('1200003740', '0412100008')
+        '9200000077' → (None, None)  (plain ID, no labelled parts)
+    """
+    text = safe_str(app_id_text)
+    gna_id = None
+    lta_id = None
+    stii = re.search(r'St-?II\s*:?\s*(\d{6,})', text, re.IGNORECASE)
+    if stii:
+        gna_id = stii.group(1)
+    lta = re.search(r'LTA\s*:?\s*(\d{6,})', text, re.IGNORECASE)
+    if lta:
+        lta_id = lta.group(1)
+    return gna_id, lta_id
+
+
+def _merge_type_from_effectiveness(
+    cmets_type: str,
+    eff_type_of_project: str,
+    row: pd.Series,
+) -> str:
+    """Combine CMETS Type with effectiveness type_of_project.
+
+    E.g. CMETS='BESS' + effectiveness='Solar' → 'Solar+BESS'
+    """
+    cmets_components = (
+        set(parse_type_capacity(cmets_type))
+        | components_from_type_keywords(cmets_type)
+    )
+    eff_components = components_from_type_keywords(eff_type_of_project)
+
+    # Also check capacity columns for extra evidence
+    cap_cols = {
+        "Installed/Break-up Capacity (MW) Solar": "Solar",
+        "Installed/Break-up Capacity (MW) Wind": "Wind",
+        "Installed/Break-up Capacity (MW) Hydro": "Hydro",
+        "Battery Injection (MW)": "BESS",
+        "Battery MWh": "BESS",
+        "PSP Injection (MW)": "PSP",
+    }
+    for col_name, component in cap_cols.items():
+        if _safe_float(row.get(col_name)) > 0:
+            cmets_components.add(component)
+
+    combined = cmets_components | eff_components
+    result = components_to_type(combined)
+    return result or cmets_type or ""
 
 
 def _parse_type_mw(type_str: str) -> dict[str, float]:
@@ -251,16 +309,22 @@ def _step1_effectiveness_mapping(
     # ── Match and update each CMETS row ───────────────────────────────────
     matched_gna = matched_lta = matched_52 = unmatched = 0
     capacity_computed = 0
+    type_merged = 0
+    gna_backfilled = 0
+    lta_backfilled = 0
     _make_columns_assignable(cmets_df, [
         "Name of Developers",
         "Substation",
         "State",
         "GNA Operationalization Date",
         "Application Quantum (MW)(ST II)",
+        "GNA/ST II Application ID",
+        "LTA Application ID",
         "Installed/Break-up Capacity (MW) Solar",
         "Installed/Break-up Capacity (MW) Wind",
         "Installed/Break-up Capacity (MW) Hybrid",
         "Installed/Break-up Capacity (MW) Hydro",
+        "Type",
     ])
 
     for idx, row in cmets_df.iterrows():
@@ -337,6 +401,29 @@ def _step1_effectiveness_mapping(
         if _set_installed_breakdown_from_type(cmets_df, idx, row, eff_rec):
             capacity_computed += 1
 
+        # ── Type merging: combine CMETS Type with effectiveness type ──
+        cmets_type_raw = safe_str(row.get("Type"))
+        eff_type_raw = safe_str(eff_rec.get("type_of_project"))
+        if eff_type_raw:
+            merged_type = _merge_type_from_effectiveness(
+                cmets_type_raw, eff_type_raw, cmets_df.loc[idx],
+            )
+            if merged_type and merged_type != cmets_type_raw:
+                cmets_df.at[idx, "Type"] = merged_type
+                type_merged += 1
+
+        # ── GNA/LTA backfill from effectiveness application_id ────────
+        eff_app_id = safe_str(eff_rec.get("application_id"))
+        eff_gna, eff_lta = _parse_eff_gna_lta(eff_app_id)
+        current_gna = safe_str(row.get("GNA/ST II Application ID"))
+        current_lta = safe_str(row.get("LTA Application ID"))
+        if eff_gna and not current_gna:
+            cmets_df.at[idx, "GNA/ST II Application ID"] = eff_gna
+            gna_backfilled += 1
+        if eff_lta and not current_lta:
+            cmets_df.at[idx, "LTA Application ID"] = eff_lta
+            lta_backfilled += 1
+
     # ── Write output Excel (same columns as CMETS, no add/remove) ─────
     output_excel.parent.mkdir(parents=True, exist_ok=True)
     cmets_df.to_excel(str(output_excel), index=False,
@@ -349,6 +436,12 @@ def _step1_effectiveness_mapping(
         f"Unmatched={unmatched} | "
         f"Capacity computed={capacity_computed} | "
         f"Total={len(cmets_df)}"
+    )
+    print(
+        f"[Step 1] Enrichment: "
+        f"Type merged={type_merged} | "
+        f"GNA backfilled={gna_backfilled} | "
+        f"LTA backfilled={lta_backfilled}"
     )
     print(f"[Step 1] ✓ Excel saved → {output_excel}")
     print("=" * 64)

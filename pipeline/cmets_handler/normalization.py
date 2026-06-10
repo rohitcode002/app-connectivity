@@ -1023,17 +1023,19 @@ def normalize(rows: list[MappedRow]) -> list[MappedRow]:
         enh_ids = _id_tokens(p.get("Application ID under Enhancement 5.2 or revision"))
         lta_ids = _id_tokens(p.get("LTA Application ID"))
 
-        # LTA vs GNA/Enh — if LTA ID overlaps with GNA or Enh, clear LTA
+        # LTA vs GNA/Enh — if LTA ID overlaps with GNA or Enh, clear overlapping LTA
         if lta_ids and (lta_ids & gna_ids or lta_ids & enh_ids):
-            p["LTA Application ID"] = None
-            has_lta = False
-            print(f"      [ID Dedup] LTA ID cleared — same ID already in GNA/Enh 5.2")
+            remaining = lta_ids - gna_ids - enh_ids
+            p["LTA Application ID"] = ", ".join(sorted(remaining)) if remaining else None
+            has_lta = bool(p["LTA Application ID"])
+            print(f"      [ID Dedup] LTA ID overlap cleared — same ID already in GNA/Enh 5.2")
 
-        # Enh vs GNA — if Enhancement ID overlaps with GNA, clear Enh
+        # Enh vs GNA — if Enhancement ID overlaps with GNA, clear overlapping Enh
         if enh_ids and enh_ids & gna_ids:
-            p["Application ID under Enhancement 5.2 or revision"] = None
-            has_enh = False
-            print(f"      [ID Dedup] Enh 5.2 ID cleared — same ID already in GNA")
+            remaining = enh_ids - gna_ids
+            p["Application ID under Enhancement 5.2 or revision"] = ", ".join(sorted(remaining)) if remaining else None
+            has_enh = bool(p["Application ID under Enhancement 5.2 or revision"])
+            print(f"      [ID Dedup] Enh 5.2 ID overlap cleared — same ID already in GNA")
 
         if not (has_gna or has_lta or has_enh):
             continue
@@ -1178,6 +1180,23 @@ def _merge_id_cell(existing: object, incoming: object) -> object:
     return incoming
 
 
+def _dedup_row_ids(row: dict) -> None:
+    """Ensure that the same numeric ID does not appear in multiple columns.
+    Priority: GNA > Enhancement 5.2 > LTA.
+    """
+    gna_ids = _id_tokens(row.get("GNA/ST II Application ID"))
+    enh_ids = _id_tokens(row.get("Application ID under Enhancement 5.2 or revision"))
+    lta_ids = _id_tokens(row.get("LTA Application ID"))
+
+    if lta_ids and (lta_ids & gna_ids or lta_ids & enh_ids):
+        remaining = lta_ids - gna_ids - enh_ids
+        row["LTA Application ID"] = ", ".join(sorted(remaining)) if remaining else None
+
+    if enh_ids and enh_ids & gna_ids:
+        remaining = enh_ids - gna_ids
+        row["Application ID under Enhancement 5.2 or revision"] = ", ".join(sorted(remaining)) if remaining else None
+
+
 def _merge_into_later_row(current: dict, later: dict) -> None:
     """Merge duplicate current row data into the later row.
 
@@ -1198,6 +1217,8 @@ def _merge_into_later_row(current: dict, later: dict) -> None:
         cleaned_value = clean(value)
         if cleaned_value:
             later[col] = value
+            
+    _dedup_row_ids(later)
 
 
 def consolidate_application_duplicates(rows: list[dict]) -> list[dict]:
