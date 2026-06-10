@@ -631,7 +631,10 @@ def run_single_pdf(
         text = table_text
 
         # ── Step 3: Gate check ────────────────────────────────────────────
-        passed, active_fields = page_passes_gate(text)
+        # Use context_text (native page text + table text) so that blocklist
+        # keywords appearing in page titles/descriptions (outside tables)
+        # are also caught by the gate.  The LLM still receives table_text only.
+        passed, active_fields = page_passes_gate(context_text)
         if not passed:
             print(f"  [B] Page {pnum:>3}: SKIP")
             pages_skipped += 1
